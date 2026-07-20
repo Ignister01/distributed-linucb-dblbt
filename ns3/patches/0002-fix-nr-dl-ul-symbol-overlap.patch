@@ -1,0 +1,15 @@
+diff --git a/model/nr-mac-scheduler-ns3.cc b/model/nr-mac-scheduler-ns3.cc
+index 493450efb37f784fa7af302d919f3b3d12f90dc6..7132a2eaa590789339fa7af3916b9a2677e2f9af 100644
+--- a/model/nr-mac-scheduler-ns3.cc
++++ b/model/nr-mac-scheduler-ns3.cc
+@@ -2164,7 +2164,9 @@ NrMacSchedulerNs3::DoScheduleDl (const std::vector <DlHarqInfo> &dlHarqFeedback,
+ 
+   uint8_t dataSymPerSlot = m_macSchedSapUser->GetSymbolsPerSlot () - m_dlCtrlSymbols;
+ 
+-  uint8_t dlSymAvail = dataSymPerSlot - ulAllocations.m_totUlSym;
++  uint8_t ulSymUsed = std::max (ulAllocations.m_totUlSym, m_ulCtrlSymbols);
++  NS_ASSERT (dataSymPerSlot >= ulSymUsed);
++  uint8_t dlSymAvail = dataSymPerSlot - ulSymUsed;
+   PointInFTPlane dlAssignationStartPoint (0, m_dlCtrlSymbols);
+ 
+   NS_LOG_DEBUG ("Scheduling DL for slot " << dlSfnSf <<

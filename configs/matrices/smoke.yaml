@@ -1,0 +1,27 @@
+version: 1
+name: smoke
+rounds: 1000
+alpha: 11
+timing:
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+seeds: [410]
+policies: [random_lbt, tmc_db_lbt, adaptive_db_lbt]
+conditions: []
+arm_ids: []
+scenarios:
+  - id: static-2x2
+    wifi_nodes: 2
+    nru_nodes: 2
+    legacy_ap_nodes: 0
+    legacy_sta_nodes: 0
+    traffic: saturated
+    poisson_rate_packets_ms: null
+    interference_interval_ms: null
+    interference_duration_us: null
+    interruption_std: 0.0
+    join_interval_rounds: null
+    lifetime_rounds: null
+    trace: false

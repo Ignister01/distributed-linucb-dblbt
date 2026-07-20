@@ -1,0 +1,131 @@
+version: 1
+name: reproduction
+rounds: 100000
+alpha: 11
+timing:
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+seeds: [410, 523, 631, 742, 859, 967, 1081, 1193, 1307, 1429]
+policies: [random_lbt, primary_db_lbt, tmc_db_lbt, adaptive_db_lbt]
+conditions: []
+arm_ids: []
+scenarios:
+  - id: static-symmetric-1x1
+    wifi_nodes: 1
+    nru_nodes: 1
+    legacy_ap_nodes: 0
+    legacy_sta_nodes: 0
+    traffic: saturated
+    poisson_rate_packets_ms: null
+    interference_interval_ms: null
+    interference_duration_us: null
+    interruption_std: 0.0
+    join_interval_rounds: null
+    lifetime_rounds: null
+    trace: false
+  - id: static-symmetric-2x2
+    wifi_nodes: 2
+    nru_nodes: 2
+    legacy_ap_nodes: 0
+    legacy_sta_nodes: 0
+    traffic: saturated
+    poisson_rate_packets_ms: null
+    interference_interval_ms: null
+    interference_duration_us: null
+    interruption_std: 0.0
+    join_interval_rounds: null
+    lifetime_rounds: null
+    trace: false
+  - id: static-symmetric-4x4
+    wifi_nodes: 4
+    nru_nodes: 4
+    legacy_ap_nodes: 0
+    legacy_sta_nodes: 0
+    traffic: saturated
+    poisson_rate_packets_ms: null
+    interference_interval_ms: null
+    interference_duration_us: null
+    interruption_std: 0.0
+    join_interval_rounds: null
+    lifetime_rounds: null
+    trace: false
+  - id: static-symmetric-8x8
+    wifi_nodes: 8
+    nru_nodes: 8
+    legacy_ap_nodes: 0
+    legacy_sta_nodes: 0
+    traffic: saturated
+    poisson_rate_packets_ms: null
+    interference_interval_ms: null
+    interference_duration_us: null
+    interruption_std: 0.0
+    join_interval_rounds: null
+    lifetime_rounds: null
+    trace: false
+  - id: static-symmetric-16x16
+    wifi_nodes: 16
+    nru_nodes: 16
+    legacy_ap_nodes: 0
+    legacy_sta_nodes: 0
+    traffic: saturated
+    poisson_rate_packets_ms: null
+    interference_interval_ms: null
+    interference_duration_us: null
+    interruption_std: 0.0
+    join_interval_rounds: null
+    lifetime_rounds: null
+    trace: false
+  - id: trace-static-4x4
+    wifi_nodes: 4
+    nru_nodes: 4
+    legacy_ap_nodes: 0
+    legacy_sta_nodes: 0
+    traffic: saturated
+    poisson_rate_packets_ms: null
+    interference_interval_ms: null
+    interference_duration_us: null
+    interruption_std: 0.0
+    join_interval_rounds: null
+    lifetime_rounds: null
+    trace: true
+  - id: dynamic-4x4
+    wifi_nodes: 4
+    nru_nodes: 4
+    legacy_ap_nodes: 0
+    legacy_sta_nodes: 0
+    traffic: saturated
+    poisson_rate_packets_ms: null
+    interference_interval_ms: null
+    interference_duration_us: null
+    interruption_std: 0.0
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+    trace: false
+  - id: legacy-ap-4x4
+    wifi_nodes: 4
+    nru_nodes: 4
+    legacy_ap_nodes: 4
+    legacy_sta_nodes: 0
+    traffic: saturated
+    poisson_rate_packets_ms: null
+    interference_interval_ms: null
+    interference_duration_us: null
+    interruption_std: 0.0
+    join_interval_rounds: null
+    lifetime_rounds: null
+    trace: false
+  - id: legacy-sta-4x4
+    wifi_nodes: 4
+    nru_nodes: 4
+    legacy_ap_nodes: 0
+    legacy_sta_nodes: 4
+    traffic: saturated
+    poisson_rate_packets_ms: null
+    interference_interval_ms: null
+    interference_duration_us: null
+    interruption_std: 0.0
+    join_interval_rounds: null
+    lifetime_rounds: null
+    trace: false

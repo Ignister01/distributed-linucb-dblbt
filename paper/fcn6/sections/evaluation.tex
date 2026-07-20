@@ -1,0 +1,124 @@
+\section{Evaluation}
+\label{sec:evaluation}
+
+The evaluation reuses the completed paired-seed data. The event simulator
+implements \eqref{eq:reduction} for \num{100000} contention rounds, with
+\SI{2}{\milli\second} transmissions, equal Wi-Fi/NR-U contention windows
+$[15,63]$, and a \SI{250}{\micro\second} NR-U synchronization grid. Ten formal
+seeds are disjoint from the three pretraining seeds. Pairing fixes exogenous
+random streams across policies. Held-out conditions cover unseen symmetric and
+asymmetric densities, two Poisson rates, two periodic occupancies, sensing
+perturbation, and a combined dynamic case. A separate
+ns-3.35/5G-LENA/NR-U model provides the packet-level cross-check.
+
+The reporting utility is distinct from the local reward in
+\eqref{eq:reward}:
+\begin{align}
+U_D^{\rm eval}&=1-\operatorname{clip}
+ (D_{95}/500\,\mathrm{ms},0,1),\\
+U_{\rm eval}&=(A_{\rm total}+U_D^{\rm eval}+J)/3-0.25P_{\rm col}.
+\label{eq:evaluation-utility}
+\end{align}
+It combines effective data airtime, P95 access delay, Jain fairness, and event
+collision probability. Full scenario matrices, seeds, and component metrics
+appear in the appendix.
+
+The experiments follow the control argument in order. Mechanism validation
+checks that online selection does not erase deterministic spacing in a stable
+cell. Held-out event scenarios then ask whether the pretrained controller
+transfers to unseen density, asymmetry, traffic, and occupancy conditions. The
+packet model replaces the ideal contention rule with EDCA, HARQ, PHY
+interference, and NR-U alignment. Finally, ablations compare contextual and
+context-free selection and remove feature groups from the same dynamic case.
+This sequence keeps a scheduling result, a generalization result, and a
+packet-level result from being treated as interchangeable evidence.
+
+\subsection{Mechanism Validation}
+
+\begin{table}[!t]
+\caption{Mechanism Validation over Ten Event Seeds}
+\label{tab:mechanism}
+\centering
+\footnotesize
+\begin{tabular}{@{}llrrr@{}}
+\toprule
+Scenario & Policy & $U_{\rm eval}$ & $P_{\rm col}$ & $D_{95}$ (ms) \\
+\midrule
+Static $4+4$ & Random & 0.805443 & 0.229707 & 77.881 \\
+             & Fixed TMC & 0.979499 & 0.000139 & 14.018 \\
+             & Adaptive & 0.979499 & 0.000139 & 14.018 \\
+Load-change $4+4$ & Random & 0.814530 & 0.174006 & 93.110 \\
+             & Fixed TMC & 0.961087 & 0.017734 & 14.018 \\
+             & Adaptive & 0.961785 & 0.016664 & 14.018 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Table~\ref{tab:mechanism} first asks whether adding a learner disturbs the
+underlying schedule. In static $4+4$, deterministic spacing removes almost all
+event collisions and the random-backoff delay tail. Adaptive and fixed TMC
+DB-LBT are numerically identical. After a load change, the adaptive controller
+retains the mechanism and improves utility from $0.961087$ to $0.961785$.
+
+\subsection{Generalization beyond Training Conditions}
+
+\begin{figure*}[!t]
+  \centering
+  \subfloat[Mean utility across held-out scenarios.]{%
+    \includegraphics[width=.47\textwidth]{results-heldout.pdf}}
+  \hfill
+  \subfloat[Paired adaptive-minus-fixed-TMC differences.]{%
+    \includegraphics[width=.51\textwidth]{results-differences.pdf}}
+  \caption{Held-out event evaluation over ten paired seeds. In (a), the axis is
+  truncated and values are printed beside the bars. In (b), differences are
+  scaled by $10^3$; bars are 95\% paired-bootstrap intervals. Green favors
+  adaptive DB-LBT, red favors fixed TMC, and gray crosses zero.}
+  \label{fig:generalization}
+\end{figure*}
+
+Figure~\ref{fig:generalization}(a) aggregates ten unseen topology, load, and
+occupancy scenarios. Adaptive DB-LBT reaches $0.928023$, compared with
+$0.926467$ for fixed TMC and $0.928067$ for the training-seed fixed oracle.
+The paired gain is $0.001556$, with 95\% interval
+$[0.001470,0.001651]$. Stable utility changes by only
+$-7.0\times10^{-7}$, and Jain fairness stays within the registered
+$-0.01$ tolerance.
+
+Each confidence interval is formed from ten within-seed policy differences,
+not from pooled rounds. The exogenous seed controls arrivals, occupancy, and
+other scenario randomness shared by the compared policies. The fixed oracle is
+chosen only from training seeds and is included as a reference for a single
+non-adaptive tuple, not as an online upper bound.
+
+The aggregate hides useful variation. Light Poisson traffic and the combined
+dynamic case improve, heavy Poisson traffic slightly degrades, and several
+periodic or sensing-perturbation cases tie at retained precision
+[Fig.~\ref{fig:generalization}(b)]. Across the registered non-ideal set, the
+gain is $0.289\%$, below the 10\% engineering target. The adaptive controller
+is therefore most useful where local load and active-set information changes
+the preferred recovery profile.
+
+\subsection{Packet-Level Cross-Check}
+
+The ns-3 model retains Wi-Fi ACK/EDCA behavior, NR-U HARQ and boundary
+alignment, a 3GPP indoor frequency-selective channel, and a periodic waveform
+interferer. Node positions and the sampled channel matrix are fixed. The
+load-change case switches offered load halfway through its two-second run,
+making it the closest packet-level realization of the intended phase change.
+
+Across three paired seeds, adaptive-minus-fixed changes mix favorable and
+unfavorable Wi-Fi/NR-U throughput and delay components. The event direction is
+tied in the static and periodic cases; for the load change it is favorable,
+whereas the packet-level majority is unfavorable. The stored ns-3 field named
+\texttt{collision\_probability} is reported as packet-loss ratio because it is
+computed from transmitted minus received IP packets and can include decoding
+failure. The appendix gives every technology-level difference.
+
+\subsection{What the Context Adds}
+
+The combined dynamic event case isolates the controller choices. Replacing
+LinUCB with context-free UCB lowers utility by $0.000686$, with 95\% interval
+$[-0.001259,-0.000138]$. This is the clearest evidence that the local feature
+vector matters. Removing queue, delay, or CCA/interruption features one group
+at a time yields intervals that cross zero, as does freezing online updates.
+The complete ablation forest is retained in the appendix.

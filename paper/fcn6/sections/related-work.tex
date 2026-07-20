@@ -1,0 +1,25 @@
+\section{Related Work}
+\label{sec:related}
+
+Wi-Fi/NR-U coexistence schemes tune contention windows, reserve or defer
+airtime, resolve mini-slot collisions, and schedule around technology-specific
+timing \cite{naik2020next,saha2021survey,kosek2021downlink}. Deterministic and
+semi-random WLAN backoff instead creates post-success structure without
+explicit slot assignments \cite{he2013semirandom,sanabria2017higheff}. DB-LBT
+extends this principle across Wi-Fi and NR-U: countdown interruptions estimate
+active contention, and a deterministic recovery counter spaces later attempts
+\cite{kosek2022dblbt}. Its TMC extension studies convergence with periodic
+schedules and random busy slots, then evaluates traffic, interference, and
+sensing perturbations \cite{tinnirello2026deterministic}. Both provide the
+fixed mechanism on which our adaptive action space is built.
+
+Machine learning has been applied throughout the IEEE 802.11 stack
+\cite{szott2022wifiml}. LTE-LAA work adapts contention windows from observed
+performance \cite{ali2017ml}, while reinforcement learning has optimized
+technology-level efficiency and fairness \cite{han2020rl}. Our setting is
+smaller and more constrained. A transmitter chooses among 24 protocol-valid
+recovery profiles, observes only its own outcome, and must learn with limited
+online samples. These properties favor a contextual bandit with an explicit
+uncertainty bonus \cite{li2010linucb}. The contribution is the mapping from
+local protocol measurements to this constrained decision problem, rather than
+a new generic bandit algorithm.

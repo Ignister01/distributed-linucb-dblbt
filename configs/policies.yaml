@@ -1,0 +1,28 @@
+policies:
+  random_lbt:
+    kind: random_lbt
+    cw_min: 15
+    cw_max: 63
+
+  primary_db_lbt:
+    kind: primary_db_lbt
+    alpha: 11
+    m: 4
+    beta: 3
+
+  tmc_db_lbt:
+    kind: tmc_db_lbt
+    alpha: 11
+    kappa: 7
+    beta: 3
+    m: 6
+    b_init: 15
+
+  adaptive_db_lbt:
+    kind: adaptive_db_lbt
+    alpha: 11
+    grid:
+      kappa: [5, 7]
+      beta: [2, 3]
+      m: [4, 6, 10]
+      b_init: [15, 31]

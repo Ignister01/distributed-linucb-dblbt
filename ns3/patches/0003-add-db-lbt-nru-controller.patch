@@ -1,0 +1,2366 @@
+diff --git a/examples/dblbt-nru-wifi-validation.cc b/examples/dblbt-nru-wifi-validation.cc
+new file mode 100644
+index 0000000..87b1948
+--- /dev/null
++++ b/examples/dblbt-nru-wifi-validation.cc
+@@ -0,0 +1,871 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++
++#include "ns3/applications-module.h"
++#include "ns3/beamforming-vector.h"
++#include "ns3/flow-monitor-module.h"
++#include "ns3/internet-module.h"
++#include "ns3/isotropic-antenna-model.h"
++#include "ns3/mobility-module.h"
++#include "ns3/multi-model-spectrum-channel.h"
++#include "../model/nr-db-lbt-access-manager.h"
++#include "ns3/nr-module.h"
++#include "ns3/nr-u-module.h"
++#include "ns3/non-communicating-net-device.h"
++#include "ns3/sqlite-output.h"
++#include "ns3/spectrum-module.h"
++#include "ns3/three-gpp-spectrum-propagation-loss-model.h"
++#include "ns3/uniform-planar-array.h"
++#include "ns3/waveform-generator-helper.h"
++#include "ns3/wifi-module.h"
++#include "ns3/wifi-spectrum-value-helper.h"
++
++#include <algorithm>
++#include <cmath>
++#include <iomanip>
++#include <limits>
++#include <map>
++#include <memory>
++#include <set>
++#include <sstream>
++#include <string>
++#include <vector>
++
++using namespace ns3;
++
++NS_LOG_COMPONENT_DEFINE ("DbLbtNruWifiValidation");
++
++namespace {
++
++constexpr double kFrequency = 5.2e9;
++constexpr double kBandwidth = 20e6;
++constexpr uint32_t kPacketSize = 1000;
++const std::string kModelHash =
++  "70611e9712e3a8e4b0f35fc8e0e616f4fde9a20b17c844f1b6406da2833301e6";
++const std::string kGridHash =
++  "558da7340dfa32d8cc484ba68a05951314936d7aff34a145cc34ea051c07707c";
++const std::string kTrafficMode = "aggregate-saturated-cbr";
++const std::string kNs3Commit = "ac88b75eac1818c673cf2c939a96ac3005b1f051";
++const std::string kNrCommit = "fe0a1d2a5fb7d1547e46042041288a684893ba9e";
++const std::string kNruCommit = "75a45143b1cd382326876a9597e856338673039a";
++
++struct OccupancyTracker
++{
++  Time end {Seconds (0)};
++  Time total {Seconds (0)};
++
++  bool Active () const
++  {
++    return end > Simulator::Now ();
++  }
++
++  void Observe (Time duration)
++  {
++    Time now = Simulator::Now ();
++    Time nextEnd = now + duration;
++    if (now >= end)
++      {
++        total += duration;
++      }
++    else if (nextEnd > end)
++      {
++        total += nextEnd - end;
++      }
++    end = std::max (end, nextEnd);
++  }
++};
++
++enum class RadioKind
++{
++  Wifi,
++  Nru
++};
++
++struct ControllerBinding
++{
++  uint32_t nodeId {0};
++  std::string technology;
++  std::string stateId;
++  Ptr<DbLbtLocalController> controller;
++};
++
++struct TechnologyMetrics
++{
++  double throughputMbps {0.0};
++  double meanDelayUs {0.0};
++  double collisionProbability {0.0};
++  double channelOccupancy {0.0};
++};
++
++SqliteOutputManager *g_output = nullptr;
++OccupancyTracker g_wifiOccupancy;
++OccupancyTracker g_nruOccupancy;
++
++std::string
++Quote (const std::string &value)
++{
++  std::string escaped;
++  escaped.reserve (value.size () + 2);
++  escaped.push_back ('\'');
++  for (char character : value)
++    {
++      escaped.push_back (character);
++      if (character == '\'')
++        {
++          escaped.push_back ('\'');
++        }
++    }
++  escaped.push_back ('\'');
++  return escaped;
++}
++
++std::string
++Number (double value)
++{
++  NS_ABORT_MSG_IF (!std::isfinite (value), "refusing to store non-finite metric");
++  std::ostringstream output;
++  output << std::setprecision (17) << value;
++  return output.str ();
++}
++
++void
++Exec (SQLiteOutput &database, const std::string &statement)
++{
++  NS_ABORT_MSG_IF (!database.WaitExec (statement),
++                   "SQLite statement failed: " << statement);
++}
++
++bool
++IsHash (const std::string &value)
++{
++  return value.size () == 64 &&
++         std::all_of (value.begin (), value.end (), [] (char character) {
++           return (character >= '0' && character <= '9') ||
++                  (character >= 'a' && character <= 'f');
++         });
++}
++
++void
++ConfigureDefaults ()
++{
++  Config::SetDefault ("ns3::ThreeGppPropagationLossModel::ShadowingEnabled",
++                      BooleanValue (false));
++  Config::SetDefault ("ns3::IdealBeamformingHelper::BeamformingMethod",
++                      TypeIdValue (CellScanBeamforming::GetTypeId ()));
++  Config::SetDefault ("ns3::IdealBeamformingHelper::BeamformingPeriodicity",
++                      TimeValue (Seconds (1)));
++  Config::SetDefault ("ns3::CellScanBeamforming::BeamSearchAngleStep",
++                      DoubleValue (30.0));
++  Config::SetDefault ("ns3::UniformPlanarArray::NumColumns", UintegerValue (2));
++  Config::SetDefault ("ns3::UniformPlanarArray::NumRows", UintegerValue (2));
++  Config::SetDefault ("ns3::NrGnbPhy::NoiseFigure", DoubleValue (7));
++  Config::SetDefault ("ns3::NrUePhy::NoiseFigure", DoubleValue (7));
++  Config::SetDefault ("ns3::WifiPhy::RxNoiseFigure", DoubleValue (7));
++  Config::SetDefault ("ns3::NrSpectrumPhy::UnlicensedMode", BooleanValue (true));
++  Config::SetDefault ("ns3::LteRlcUm::MaxTxBufferSize", UintegerValue (999999999));
++  Config::SetDefault ("ns3::PointToPointEpcHelper::S1uLinkDelay",
++                      TimeValue (Seconds (0)));
++  Config::SetDefault ("ns3::NoBackhaulEpcHelper::X2LinkDelay",
++                      TimeValue (Seconds (0)));
++  Config::SetDefault ("ns3::LteEnbRrc::EpsBearerToRlcMapping",
++                      StringValue ("RlcUmAlways"));
++  Config::SetDefault ("ns3::NrAmc::ErrorModelType",
++                      TypeIdValue (NrEesmIrT1::GetTypeId ()));
++  Config::SetDefault ("ns3::NrAmc::AmcModel", EnumValue (NrAmc::ShannonModel));
++  Config::SetDefault ("ns3::NrSpectrumPhy::ErrorModelType",
++                      TypeIdValue (NrEesmIrT1::GetTypeId ()));
++  Config::SetDefault ("ns3::NrMacSchedulerNs3::EnableSrsInFSlots",
++                      BooleanValue (false));
++  Config::SetDefault ("ns3::NrMacSchedulerNs3::EnableSrsInUlSlots",
++                      BooleanValue (false));
++  Config::SetDefault ("ns3::WifiRemoteStationManager::FragmentationThreshold",
++                      StringValue ("999999"));
++  Config::SetDefault ("ns3::WifiRemoteStationManager::RtsCtsThreshold",
++                      StringValue ("999999"));
++  Config::SetDefault ("ns3::ApWifiMac::EnableBeaconJitter", BooleanValue (true));
++  Config::SetDefault ("ns3::NrLbtAccessManager::EnergyDetectionThreshold",
++                      DoubleValue (-79.0));
++}
++
++void
++InstallPositions (const NodeContainer &wifiAps,
++                  const NodeContainer &wifiStas,
++                  const NodeContainer &nruGnbs,
++                  const NodeContainer &nruUes)
++{
++  NodeContainer all;
++  all.Add (wifiAps);
++  all.Add (wifiStas);
++  all.Add (nruGnbs);
++  all.Add (nruUes);
++  MobilityHelper mobility;
++  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
++  mobility.Install (all);
++  for (uint32_t index = 0; index < wifiAps.GetN (); ++index)
++    {
++      double y = 2.0 + 3.0 * index;
++      wifiAps.Get (index)->GetObject<MobilityModel> ()->SetPosition ({1.0, y, 1.5});
++      wifiStas.Get (index)->GetObject<MobilityModel> ()->SetPosition ({3.0, y, 1.0});
++    }
++  for (uint32_t index = 0; index < nruGnbs.GetN (); ++index)
++    {
++      double y = 2.0 + 3.0 * index;
++      nruGnbs.Get (index)->GetObject<MobilityModel> ()->SetPosition ({9.0, y, 1.5});
++      nruUes.Get (index)->GetObject<MobilityModel> ()->SetPosition ({7.0, y, 1.0});
++    }
++}
++
++void
++ObserveOccupancy (RadioKind kind, uint32_t nodeId, const Time &duration)
++{
++  OccupancyTracker &own = kind == RadioKind::Wifi ? g_wifiOccupancy : g_nruOccupancy;
++  OccupancyTracker &other = kind == RadioKind::Wifi ? g_nruOccupancy : g_wifiOccupancy;
++  g_output->UidIsTxing (nodeId);
++  if (own.Active ())
++    {
++      g_output->SimultaneousTxSameTechnology (nodeId);
++    }
++  if (other.Active ())
++    {
++      g_output->SimultaneousTxOtherTechnology (nodeId);
++    }
++  own.Observe (duration);
++}
++
++uint32_t
++WifiBackoff (Ptr<DbLbtLocalController> controller,
++             Ptr<QosTxop> txop,
++             uint32_t currentCw)
++{
++  Ptr<WifiMacQueue> queue = txop->GetWifiMacQueue ();
++  double maximum = static_cast<double> (queue->GetMaxSize ().GetValue ());
++  double occupancy = maximum > 0.0 ? queue->GetNPackets () / maximum : 0.0;
++  controller->SetQueueOccupancy (occupancy);
++  return controller->NextBackoff (currentCw);
++}
++
++void
++WifiPhyState (Ptr<DbLbtLocalController> controller,
++              Time start,
++              Time duration,
++              WifiPhyState state)
++{
++  NS_UNUSED (start);
++  if (state == WifiPhyState::TX)
++    {
++      controller->NotifyOwnTx (duration);
++    }
++}
++
++Ptr<DbLbtLocalController>
++ConfigureController (const std::string &policy,
++                     const std::string &modelPath,
++                     const std::string &modelHash,
++                     const std::string &gridHash,
++                     int64_t stream)
++{
++  Ptr<DbLbtLocalController> controller = CreateObject<DbLbtLocalController> ();
++  if (policy == "adaptive")
++    {
++      controller->ConfigureAdaptive (modelPath, modelHash, gridHash);
++    }
++  else
++    {
++      controller->ConfigureTmc ();
++    }
++  controller->AssignStreams (stream);
++  return controller;
++}
++
++void
++BindWifiController (Ptr<WifiNetDevice> device,
++                    Ptr<DbLbtLocalController> controller)
++{
++  Ptr<RegularWifiMac> mac = DynamicCast<RegularWifiMac> (device->GetMac ());
++  NS_ABORT_MSG_IF (!mac, "Wi-Fi device lacks RegularWifiMac");
++  Ptr<QosTxop> txop = mac->GetQosTxop (AC_BE);
++  txop->SetDbLbtBackoffCallback (
++    MakeBoundCallback (&WifiBackoff, controller, txop));
++  txop->SetDbLbtBusyCallback (
++    MakeCallback (&DbLbtLocalController::NotifyBusy, controller));
++  txop->SetDbLbtOutcomeCallback (
++    MakeCallback (&DbLbtLocalController::NotifyOutcome, controller));
++  txop->SetDbLbtGrantCallback (
++    MakeCallback (&DbLbtLocalController::NotifyGrant, controller));
++
++  Ptr<SpectrumWifiPhy> phy = DynamicCast<SpectrumWifiPhy> (device->GetPhy ());
++  PointerValue stateValue;
++  phy->GetAttribute ("State", stateValue);
++  Ptr<WifiPhyStateHelper> state =
++    DynamicCast<WifiPhyStateHelper> (stateValue.Get<WifiPhyStateHelper> ());
++  state->TraceConnectWithoutContext (
++    "State", MakeBoundCallback (&WifiPhyState, controller));
++}
++
++void
++InstallInterferer (Ptr<MultiModelSpectrumChannel> channel,
++                   Ptr<ThreeGppSpectrumPropagationLossModel> spectrumPropagation,
++                   double appStart,
++                   double simTime,
++                   uint32_t interferenceIntervalMs,
++                   uint32_t interferenceDurationMs)
++{
++  NS_ABORT_MSG_IF (interferenceIntervalMs != 300 ||
++                     interferenceDurationMs == 0 ||
++                     interferenceDurationMs >= interferenceIntervalMs,
++                   "non-ideal scenario requires a 300 ms finite interference interval");
++  NodeContainer node;
++  node.Create (1);
++  MobilityHelper mobility;
++  mobility.SetMobilityModel ("ns3::ConstantPositionMobilityModel");
++  mobility.Install (node);
++  node.Get (0)->GetObject<MobilityModel> ()->SetPosition ({5.0, 5.0, 1.5});
++  Ptr<SpectrumValue> psd =
++    WifiSpectrumValueHelper::CreateOfdmTxPowerSpectralDensity (
++      5200, 20, 0.01, 20);
++  WaveformGeneratorHelper helper;
++  helper.SetChannel (channel);
++  helper.SetTxPowerSpectralDensity (psd);
++  helper.SetPhyAttribute ("Period",
++                          TimeValue (MilliSeconds (interferenceIntervalMs)));
++  helper.SetPhyAttribute (
++    "DutyCycle",
++    DoubleValue (static_cast<double> (interferenceDurationMs) /
++                 interferenceIntervalMs));
++  NetDeviceContainer devices = helper.Install (node);
++  Ptr<PhasedArrayModel> interferenceAntenna =
++    CreateObjectWithAttributes<UniformPlanarArray> (
++      "NumColumns", UintegerValue (1),
++      "NumRows", UintegerValue (1),
++      "AntennaElement", PointerValue (CreateObject<IsotropicAntennaModel> ()));
++  spectrumPropagation->AddDevice (devices.Get (0), interferenceAntenna);
++  Ptr<WaveformGenerator> generator =
++    devices.Get (0)->GetObject<NonCommunicatingNetDevice> ()
++      ->GetPhy ()->GetObject<WaveformGenerator> ();
++  Simulator::Schedule (Seconds (appStart), &WaveformGenerator::Start, generator);
++  Simulator::Schedule (Seconds (simTime), &WaveformGenerator::Stop, generator);
++}
++
++void
++CreateValidationTables (SQLiteOutput &database)
++{
++  Exec (database,
++        "CREATE TABLE IF NOT EXISTS validation_metadata ("
++        "schema_version INTEGER NOT NULL, job_id TEXT NOT NULL, "
++        "policy TEXT NOT NULL, scenario TEXT NOT NULL, seed INTEGER NOT NULL, "
++        "run_id INTEGER NOT NULL, wifi_aps INTEGER NOT NULL, "
++        "nru_gnbs INTEGER NOT NULL, node_rate_bps INTEGER NOT NULL, "
++        "traffic_mode TEXT NOT NULL, srs_enabled INTEGER NOT NULL, "
++        "alpha INTEGER NOT NULL, "
++        "cold_start_attempts INTEGER NOT NULL, decision_interval INTEGER NOT NULL, "
++        "context_dim INTEGER NOT NULL, num_arms INTEGER NOT NULL, "
++        "model_sha256 TEXT NOT NULL, model_export_sha256 TEXT NOT NULL, "
++        "action_grid_hash TEXT NOT NULL, ns3_commit TEXT NOT NULL, "
++        "nr_commit TEXT NOT NULL, nru_commit TEXT NOT NULL, "
++        "patch_sha256 TEXT NOT NULL, scenario_sha256 TEXT NOT NULL);");
++  Exec (database,
++        "CREATE TABLE IF NOT EXISTS dblbt_nodes (node_id INTEGER PRIMARY KEY, "
++        "technology TEXT NOT NULL, state_id TEXT NOT NULL UNIQUE);");
++  Exec (database,
++        "CREATE TABLE IF NOT EXISTS dblbt_attempts (node_id INTEGER NOT NULL, "
++        "attempt_id INTEGER NOT NULL, outcome TEXT NOT NULL, elapsed_us REAL NOT NULL, "
++        "busy_us REAL NOT NULL, interruptions INTEGER NOT NULL, "
++        "access_delay_us REAL NOT NULL, queue_occupancy REAL NOT NULL, "
++        "arrivals INTEGER NOT NULL, retries INTEGER NOT NULL, "
++        "effective_data_us REAL NOT NULL, selected_backoff INTEGER NOT NULL, "
++        "PRIMARY KEY (node_id, attempt_id));");
++  Exec (database,
++        "CREATE TABLE IF NOT EXISTS dblbt_decisions (node_id INTEGER NOT NULL, "
++        "decision_round INTEGER NOT NULL, arm_id INTEGER NOT NULL, "
++        "kappa INTEGER NOT NULL, alpha INTEGER NOT NULL, beta INTEGER NOT NULL, "
++        "m INTEGER NOT NULL, b_init INTEGER NOT NULL, reward REAL NOT NULL, "
++        "context_0 REAL NOT NULL, context_1 REAL NOT NULL, context_2 REAL NOT NULL, "
++        "context_3 REAL NOT NULL, context_4 REAL NOT NULL, context_5 REAL NOT NULL, "
++        "context_6 REAL NOT NULL, context_7 REAL NOT NULL, context_8 REAL NOT NULL, "
++        "context_9 REAL NOT NULL, context_10 REAL NOT NULL, "
++        "PRIMARY KEY (node_id, decision_round));");
++  Exec (database,
++        "CREATE TABLE IF NOT EXISTS validation_metrics (technology TEXT PRIMARY KEY, "
++        "throughput_mbps REAL NOT NULL, mean_delay_us REAL NOT NULL, "
++        "collision_probability REAL NOT NULL, channel_occupancy REAL NOT NULL);");
++  for (const std::string table : {"validation_metadata", "dblbt_nodes",
++                                  "dblbt_attempts", "dblbt_decisions",
++                                  "validation_metrics"})
++    {
++      Exec (database, "DELETE FROM " + table + ";");
++    }
++}
++
++void
++WriteValidationOutput (
++  const std::string &outputDb,
++  const std::string &jobId,
++  const std::string &policy,
++  const std::string &scenario,
++  uint32_t seed,
++  uint32_t runId,
++  uint32_t wifiAps,
++  uint32_t nruGnbs,
++  uint64_t nodeRateBps,
++  const std::string &modelHash,
++  const std::string &modelExportHash,
++  const std::string &gridHash,
++  const std::string &patchHash,
++  const std::string &scenarioHash,
++  const std::vector<ControllerBinding> &bindings,
++  const std::map<std::string, TechnologyMetrics> &metrics)
++{
++  SQLiteOutput database (outputDb, "/dblbt-" + jobId + "-custom");
++  CreateValidationTables (database);
++  Exec (database,
++        "INSERT INTO validation_metadata VALUES (1," + Quote (jobId) + "," +
++        Quote (policy) + "," + Quote (scenario) + "," + std::to_string (seed) +
++        "," + std::to_string (runId) + "," + std::to_string (wifiAps) + "," +
++        std::to_string (nruGnbs) + "," + std::to_string (nodeRateBps) + "," +
++        Quote (kTrafficMode) + ",0,11,8,32,11,24," + Quote (modelHash) +
++        "," + Quote (modelExportHash) + "," + Quote (gridHash) + "," +
++        Quote (kNs3Commit) + "," + Quote (kNrCommit) + "," + Quote (kNruCommit) +
++        "," + Quote (patchHash) + "," + Quote (scenarioHash) + ");");
++
++  for (const auto &binding : bindings)
++    {
++      Exec (database,
++            "INSERT INTO dblbt_nodes VALUES (" +
++            std::to_string (binding.nodeId) + "," + Quote (binding.technology) +
++            "," + Quote (binding.stateId) + ");");
++      if (!binding.controller)
++        {
++          continue;
++        }
++      uint64_t attemptId = 0;
++      for (const auto &attempt : binding.controller->GetAttempts ())
++        {
++          ++attemptId;
++          Exec (database,
++                "INSERT INTO dblbt_attempts VALUES (" +
++                std::to_string (binding.nodeId) + "," + std::to_string (attemptId) +
++                "," + Quote (attempt.success ? "success" : "collision") + "," +
++                Number (attempt.elapsedUs) + "," + Number (attempt.busyUs) + "," +
++                std::to_string (attempt.interruptions) + "," +
++                Number (attempt.accessDelayUs) + "," +
++                Number (attempt.queueOccupancy) + "," +
++                std::to_string (attempt.arrivals) + "," +
++                std::to_string (attempt.retries) + "," +
++                Number (attempt.effectiveDataUs) + "," +
++                std::to_string (attempt.selectedBackoff) + ");");
++        }
++      for (const auto &decision : binding.controller->GetDecisions ())
++        {
++          std::string statement =
++            "INSERT INTO dblbt_decisions VALUES (" +
++            std::to_string (binding.nodeId) + "," +
++            std::to_string (decision.attemptId) + "," +
++            std::to_string (decision.armId) + "," +
++            std::to_string (decision.profile.kappa) + "," +
++            std::to_string (decision.profile.alpha) + "," +
++            std::to_string (decision.profile.beta) + "," +
++            std::to_string (decision.profile.m) + "," +
++            std::to_string (decision.profile.bInit) + "," +
++            Number (decision.reward);
++          for (double value : decision.context)
++            {
++              statement += "," + Number (value);
++            }
++          Exec (database, statement + ");");
++        }
++    }
++
++  for (const std::string technology : {"wifi", "nru"})
++    {
++      const auto &value = metrics.at (technology);
++      Exec (database,
++            "INSERT INTO validation_metrics VALUES (" + Quote (technology) +
++            "," + Number (value.throughputMbps) + "," +
++            Number (value.meanDelayUs) + "," +
++            Number (value.collisionProbability) + "," +
++            Number (value.channelOccupancy) + ");");
++    }
++}
++
++} // namespace
++
++int
++main (int argc, char *argv[])
++{
++  std::string policy = "tmc";
++  std::string scenario = "static-4x4";
++  std::string modelPath;
++  std::string modelSha256 = kModelHash;
++  std::string modelExportSha256 (64, '0');
++  std::string actionGridHash = kGridHash;
++  std::string patchSha256 (64, '0');
++  std::string scenarioSha256 (64, '0');
++  std::string outputDb = "dblbt-nru-wifi-validation.db";
++  std::string nodeRate = "2Mbps";
++  uint32_t wifiAps = 4;
++  uint32_t nruGnbs = 4;
++  uint32_t seed = 410;
++  uint32_t runId = 1;
++  uint32_t interferenceIntervalMs = 0;
++  uint32_t interferenceDurationMs = 2;
++  double simTime = 2.0;
++  double appStart = 0.2;
++  bool formal = false;
++
++  CommandLine cmd;
++  cmd.AddValue ("policy", "random, tmc, or adaptive", policy);
++  cmd.AddValue ("scenario", "validation scenario id", scenario);
++  cmd.AddValue ("wifiAps", "number of Wi-Fi AP/STA pairs", wifiAps);
++  cmd.AddValue ("nruGnbs", "number of NR-U gNB/UE pairs", nruGnbs);
++  cmd.AddValue ("simTime", "simulation duration in seconds", simTime);
++  cmd.AddValue ("appStart", "measurement application start in seconds", appStart);
++  cmd.AddValue ("seed", "ns-3 RNG seed", seed);
++  cmd.AddValue ("runId", "ns-3 RNG run", runId);
++  cmd.AddValue ("modelPath", "strict ASCII fixed LinUCB model", modelPath);
++  cmd.AddValue ("modelSha256", "source NPZ SHA-256", modelSha256);
++  cmd.AddValue ("modelExportSha256", "ASCII model SHA-256", modelExportSha256);
++  cmd.AddValue ("actionGridHash", "24-arm grid SHA-256", actionGridHash);
++  cmd.AddValue ("patchSha256", "applied source patch SHA-256", patchSha256);
++  cmd.AddValue ("scenarioSha256", "scenario source SHA-256", scenarioSha256);
++  cmd.AddValue ("outputDb", "output SQLite database", outputDb);
++  cmd.AddValue ("nodeRate", "saturated offered load per contender", nodeRate);
++  cmd.AddValue ("interferenceIntervalMs", "periodic interference interval", interferenceIntervalMs);
++  cmd.AddValue ("interferenceDurationMs", "periodic interference duration", interferenceDurationMs);
++  cmd.AddValue ("formal", "enforce the preregistered formal matrix", formal);
++  cmd.Parse (argc, argv);
++
++  NS_ABORT_MSG_IF (policy != "random" && policy != "tmc" && policy != "adaptive",
++                   "unsupported policy");
++  NS_ABORT_MSG_IF (wifiAps == 0 || nruGnbs == 0 || simTime <= appStart,
++                   "invalid topology or timing");
++  NS_ABORT_MSG_IF (!IsHash (modelSha256) || !IsHash (modelExportSha256) ||
++                     !IsHash (actionGridHash) || !IsHash (patchSha256) ||
++                     !IsHash (scenarioSha256),
++                   "all provenance hashes must be lowercase SHA-256");
++  NS_ABORT_MSG_IF (modelSha256 != kModelHash || actionGridHash != kGridHash,
++                   "model provenance differs from the frozen experiment");
++  if (policy == "adaptive")
++    {
++      NS_ABORT_MSG_IF (modelPath.empty (), "adaptive policy requires modelPath");
++    }
++  if (formal)
++    {
++      bool staticOk = scenario == "static-4x4" && wifiAps == 4 && nruGnbs == 4 &&
++                      interferenceIntervalMs == 0;
++      bool dynamicOk = scenario == "dynamic-4x4" && wifiAps == 4 && nruGnbs == 4 &&
++                       interferenceIntervalMs == 0;
++      bool nonidealOk = scenario == "nonideal-6x6-300ms" && wifiAps == 6 &&
++                        nruGnbs == 6 && interferenceIntervalMs == 300 &&
++                        interferenceDurationMs == 2;
++      NS_ABORT_MSG_IF (!(staticOk || dynamicOk || nonidealOk),
++                       "job is outside the frozen formal matrix");
++      NS_ABORT_MSG_IF (seed != 410 && seed != 523 && seed != 631,
++                       "formal seed is not preregistered");
++      NS_ABORT_MSG_IF (runId != 1 || simTime != 2.0 || appStart != 0.2,
++                       "formal timing or run id changed");
++      NS_ABORT_MSG_IF (nodeRate != "2Mbps",
++                       "formal offered load changed");
++    }
++
++  RngSeedManager::SetSeed (seed);
++  RngSeedManager::SetRun (runId);
++  ConfigureDefaults ();
++  if (policy != "random")
++    {
++      Config::SetDefault ("ns3::NrDbLbtAccessManager::Policy", StringValue (policy));
++      Config::SetDefault ("ns3::NrDbLbtAccessManager::ModelPath", StringValue (modelPath));
++      Config::SetDefault ("ns3::NrDbLbtAccessManager::ModelSha256", StringValue (modelSha256));
++      Config::SetDefault ("ns3::NrDbLbtAccessManager::ActionGridHash", StringValue (actionGridHash));
++    }
++
++  NodeContainer wifiApNodes;
++  NodeContainer wifiStaNodes;
++  NodeContainer nruGnbNodes;
++  NodeContainer nruUeNodes;
++  wifiApNodes.Create (wifiAps);
++  wifiStaNodes.Create (wifiAps);
++  nruGnbNodes.Create (nruGnbs);
++  nruUeNodes.Create (nruGnbs);
++  InstallPositions (wifiApNodes, wifiStaNodes, nruGnbNodes, nruUeNodes);
++
++  Ptr<MultiModelSpectrumChannel> channel = CreateObject<MultiModelSpectrumChannel> ();
++  Ptr<ThreeGppPropagationLossModel> propagation =
++    CreateObject<ThreeGppIndoorOfficePropagationLossModel> ();
++  Ptr<ThreeGppSpectrumPropagationLossModel> spectrumPropagation =
++    CreateObject<ThreeGppSpectrumPropagationLossModel> ();
++  propagation->SetAttributeFailSafe ("Frequency", DoubleValue (kFrequency));
++  spectrumPropagation->SetChannelModelAttribute ("Frequency", DoubleValue (kFrequency));
++  Ptr<ThreeGppIndoorMixedOfficeChannelConditionModel> condition =
++    CreateObject<ThreeGppIndoorMixedOfficeChannelConditionModel> ();
++  spectrumPropagation->SetChannelModelAttribute ("Scenario", StringValue ("InH-OfficeMixed"));
++  spectrumPropagation->SetChannelModelAttribute ("ChannelConditionModel", PointerValue (condition));
++  propagation->SetChannelConditionModel (condition);
++  channel->AddPropagationLossModel (propagation);
++  channel->AddSpectrumPropagationLossModel (spectrumPropagation);
++
++  NodeContainer remoteHostContainer;
++  remoteHostContainer.Create (1);
++  Ptr<Node> remoteHost = remoteHostContainer.Get (0);
++  InternetStackHelper internet;
++  internet.Install (remoteHostContainer);
++
++  std::string semaphore = "/dblbt-" + scenario + "-" +
++                          std::to_string (seed) + "-" + policy + "-base";
++  SqliteOutputManager manager (outputDb, semaphore, 5.0, seed, runId);
++  g_output = &manager;
++  std::vector<ControllerBinding> bindings;
++  std::set<uint32_t> wifiAddresses;
++  std::set<uint32_t> nruAddresses;
++  std::vector<Ipv4Address> destinations;
++  std::vector<std::string> destinationTechnologies;
++  std::vector<std::unique_ptr<WifiSetup>> wifiSetups;
++
++  for (uint32_t index = 0; index < wifiAps; ++index)
++    {
++      std::ostringstream ssid;
++      ssid << "dblbt-" << index;
++      auto setup = std::make_unique<WifiSetup> (
++        NodeContainer (wifiApNodes.Get (index)),
++        NodeContainer (wifiStaNodes.Get (index)),
++        channel, propagation, spectrumPropagation,
++        kFrequency, kBandwidth, 4.0, 2.0, -62.0, -62.0,
++        WIFI_STANDARD_80211ax_5GHZ, ssid.str ());
++      std::unique_ptr<Ipv4AddressHelper> address = std::make_unique<Ipv4AddressHelper> ();
++      std::ostringstream wifiNetwork;
++      wifiNetwork << "10." << index << ".0.0";
++      address->SetBase (wifiNetwork.str ().c_str (), "255.255.255.0");
++      Ipv4InterfaceContainer staInterfaces = setup->AssignIpv4ToUe (address);
++      setup->AssignIpv4ToStations (address);
++      std::ostringstream backhaulNetwork;
++      backhaulNetwork << "2." << index << ".0.0";
++      setup->ConnectToRemotes (remoteHostContainer, backhaulNetwork.str ());
++      Ipv4Address destination = staInterfaces.GetAddress (0);
++      destinations.push_back (destination);
++      destinationTechnologies.push_back ("wifi");
++      wifiAddresses.insert (destination.Get ());
++      setup->SetSinrCallback (MakeCallback (&OutputManager::SinrStore, &manager));
++      setup->SetMacTxDataFailedCb (MakeCallback (&OutputManager::MacDataTxFailed, &manager));
++      setup->SetChannelOccupancyCallback (
++        MakeBoundCallback (&ObserveOccupancy, RadioKind::Wifi));
++
++      Ptr<WifiNetDevice> device = DynamicCast<WifiNetDevice> (setup->GetGnbDev ().Get (0));
++      uint32_t nodeId = device->GetNode ()->GetId ();
++      if (policy == "random")
++        {
++          bindings.push_back ({nodeId, "wifi", "stock-wifi-" + std::to_string (nodeId), nullptr});
++        }
++      else
++        {
++          Ptr<DbLbtLocalController> controller = ConfigureController (
++            policy, modelPath, modelSha256, actionGridHash, 1000 + nodeId * 2);
++          BindWifiController (device, controller);
++          bindings.push_back ({nodeId, "wifi", controller->GetStateId (), controller});
++        }
++      wifiSetups.push_back (std::move (setup));
++    }
++
++  std::unordered_map<uint32_t, uint32_t> connections;
++  for (uint32_t index = 0; index < nruGnbs; ++index)
++    {
++      connections[index] = index;
++    }
++  std::string gnbCam = policy == "random"
++                         ? "ns3::NrCat4LbtAccessManager"
++                         : "ns3::NrDbLbtAccessManager";
++  auto nrSetup = std::make_unique<NrSingleBwpSetup> (
++    nruGnbNodes, nruUeNodes, channel, propagation, spectrumPropagation,
++    kFrequency, kBandwidth, 0, 4.0, 2.0, connections,
++    gnbCam, "ns3::NrAlwaysOnAccessManager",
++    "ns3::NrMacSchedulerTdmaPF", BandwidthPartInfo::InH_OfficeMixed);
++  std::unique_ptr<Ipv4AddressHelper> nrAddress = std::make_unique<Ipv4AddressHelper> ();
++  Ipv4InterfaceContainer nrInterfaces = nrSetup->AssignIpv4ToUe (nrAddress);
++  nrSetup->AssignIpv4ToStations (nrAddress);
++  nrSetup->ConnectToRemotes (remoteHostContainer, "1.0.0.0");
++  nrSetup->SetSinrCallback (MakeCallback (&OutputManager::SinrStore, &manager));
++  nrSetup->SetMacTxDataFailedCb (MakeCallback (&OutputManager::MacDataTxFailed, &manager));
++  nrSetup->SetChannelOccupancyCallback (
++    MakeBoundCallback (&ObserveOccupancy, RadioKind::Nru));
++  for (uint32_t index = 0; index < nruGnbs; ++index)
++    {
++      Ipv4Address destination = nrInterfaces.GetAddress (index);
++      destinations.push_back (destination);
++      destinationTechnologies.push_back ("nru");
++      nruAddresses.insert (destination.Get ());
++      Ptr<NrGnbNetDevice> device =
++        DynamicCast<NrGnbNetDevice> (nrSetup->GetGnbDev ().Get (index));
++      Ptr<NrGnbPhy> phy = device->GetPhy (0);
++      uint32_t nodeId = device->GetNode ()->GetId ();
++      if (policy == "random")
++        {
++          bindings.push_back ({nodeId, "nru", "stock-nru-" + std::to_string (nodeId), nullptr});
++        }
++      else
++        {
++          Ptr<NrDbLbtAccessManager> managerPtr =
++            DynamicCast<NrDbLbtAccessManager> (phy->GetCam ());
++          NS_ABORT_MSG_IF (!managerPtr, "gNB lacks NrDbLbtAccessManager");
++          managerPtr->AssignStreams (2000 + nodeId * 2);
++          phy->GetSpectrumPhy ()->TraceConnectWithoutContext (
++            "TxDataTrace",
++            MakeCallback (&NrDbLbtAccessManager::NotifyOwnTx, managerPtr));
++          bindings.push_back (
++            {nodeId, "nru", managerPtr->GetController ()->GetStateId (),
++             managerPtr->GetController ()});
++        }
++    }
++
++  Ipv4StaticRoutingHelper routingHelper;
++  Ptr<Ipv4StaticRouting> remoteRouting =
++    routingHelper.GetStaticRouting (remoteHost->GetObject<Ipv4> ());
++  remoteRouting->AddNetworkRouteTo (
++    Ipv4Address ("7.0.0.0"), Ipv4Mask ("255.0.0.0"),
++    1 + wifiAps);
++  for (uint32_t index = 0; index < wifiAps; ++index)
++    {
++      std::ostringstream network;
++      network << "10." << index << ".0.0";
++      remoteRouting->AddNetworkRouteTo (
++        Ipv4Address (network.str ().c_str ()),
++        Ipv4Mask ("255.255.255.0"), 1 + index);
++    }
++
++  uint16_t port = 1234;
++  PacketSinkHelper sinkHelper (
++    "ns3::UdpSocketFactory",
++    Address (InetSocketAddress (Ipv4Address::GetAny (), port)));
++  ApplicationContainer servers;
++  servers.Add (sinkHelper.Install (wifiStaNodes));
++  servers.Add (sinkHelper.Install (nruUeNodes));
++  servers.Start (Seconds (0));
++  servers.Stop (Seconds (simTime));
++
++  ApplicationContainer clients;
++  bool dynamic = scenario == "dynamic-4x4";
++  double joinTime = appStart + (simTime - appStart) / 2.0;
++  for (uint32_t index = 0; index < destinations.size (); ++index)
++    {
++      OnOffHelper onoff (
++        "ns3::UdpSocketFactory",
++        Address (InetSocketAddress (destinations.at (index), port)));
++      onoff.SetConstantRate (DataRate (nodeRate), kPacketSize);
++      ApplicationContainer installed = onoff.Install (remoteHost);
++      uint32_t localIndex = destinationTechnologies.at (index) == "wifi"
++                              ? index
++                              : index - wifiAps;
++      bool late = dynamic && localIndex >=
++                              (destinationTechnologies.at (index) == "wifi"
++                                 ? wifiAps / 2
++                                 : nruGnbs / 2);
++      installed.Start (Seconds (late ? joinTime : appStart));
++      installed.Stop (Seconds (simTime));
++      clients.Add (installed);
++    }
++
++  if (scenario == "nonideal-6x6-300ms" || interferenceIntervalMs > 0)
++    {
++      InstallInterferer (channel, spectrumPropagation, appStart, simTime,
++                         interferenceIntervalMs, interferenceDurationMs);
++    }
++
++  FlowMonitorHelper flowHelper;
++  Ptr<FlowMonitor> monitor = flowHelper.InstallAll ();
++  Simulator::Stop (Seconds (simTime));
++  Simulator::Run ();
++  monitor->CheckForLostPackets ();
++
++  struct Aggregate
++  {
++    uint64_t txPackets {0};
++    uint64_t rxPackets {0};
++    uint64_t rxBytes {0};
++    Time delay {Seconds (0)};
++  };
++  std::map<std::string, Aggregate> aggregates;
++  aggregates["wifi"] = {};
++  aggregates["nru"] = {};
++  Ptr<Ipv4FlowClassifier> classifier =
++    DynamicCast<Ipv4FlowClassifier> (flowHelper.GetClassifier ());
++  for (const auto &entry : monitor->GetFlowStats ())
++    {
++      Ipv4FlowClassifier::FiveTuple tuple = classifier->FindFlow (entry.first);
++      std::string technology;
++      if (wifiAddresses.count (tuple.destinationAddress.Get ()) > 0)
++        {
++          technology = "wifi";
++        }
++      else if (nruAddresses.count (tuple.destinationAddress.Get ()) > 0)
++        {
++          technology = "nru";
++        }
++      else
++        {
++          continue;
++        }
++      const auto &stats = entry.second;
++      Aggregate &aggregate = aggregates[technology];
++      aggregate.txPackets += stats.txPackets;
++      aggregate.rxPackets += stats.rxPackets;
++      aggregate.rxBytes += stats.rxBytes;
++      aggregate.delay += stats.delaySum;
++      double throughput = stats.rxBytes * 8.0 / (simTime - appStart) / 1e6;
++      double delay = stats.rxPackets > 0
++                       ? stats.delaySum.GetMicroSeconds () /
++                           static_cast<double> (stats.rxPackets)
++                       : 0.0;
++      double jitter = stats.rxPackets > 1
++                        ? stats.jitterSum.GetMicroSeconds () /
++                            static_cast<double> (stats.rxPackets - 1)
++                        : 0.0;
++      std::ostringstream address;
++      tuple.destinationAddress.Print (address);
++      manager.StoreE2EStatsFor (
++        technology, throughput, stats.txBytes, stats.rxBytes,
++        delay, jitter, address.str ());
++    }
++
++  double measurementDuration = simTime - appStart;
++  TechnologyMetrics wifiMetrics;
++  TechnologyMetrics nruMetrics;
++  for (const auto &technology : {std::string ("wifi"), std::string ("nru")})
++    {
++      const Aggregate &aggregate = aggregates.at (technology);
++      TechnologyMetrics value;
++      value.throughputMbps = aggregate.rxBytes * 8.0 /
++                             measurementDuration / 1e6;
++      value.meanDelayUs = aggregate.rxPackets > 0
++                            ? aggregate.delay.GetMicroSeconds () /
++                                static_cast<double> (aggregate.rxPackets)
++                            : 0.0;
++      value.collisionProbability = aggregate.txPackets > 0
++                                     ? static_cast<double> (
++                                         aggregate.txPackets - aggregate.rxPackets) /
++                                         aggregate.txPackets
++                                     : 0.0;
++      value.channelOccupancy = std::min (
++        (technology == "wifi" ? g_wifiOccupancy.total : g_nruOccupancy.total)
++          .GetSeconds () / measurementDuration,
++        1.0);
++      if (technology == "wifi")
++        {
++          wifiMetrics = value;
++        }
++      else
++        {
++          nruMetrics = value;
++        }
++    }
++  manager.StoreChannelOccupancyRateFor ("wifi", wifiMetrics.channelOccupancy);
++  manager.StoreChannelOccupancyRateFor ("nru", nruMetrics.channelOccupancy);
++  manager.Close ();
++
++  std::map<std::string, TechnologyMetrics> metrics {
++    {"wifi", wifiMetrics}, {"nru", nruMetrics}};
++  std::string jobId = scenario + "__seed-" + std::to_string (seed) + "__" + policy;
++  WriteValidationOutput (
++    outputDb, jobId, policy, scenario, seed, runId, wifiAps, nruGnbs,
++    DataRate (nodeRate).GetBitRate (), modelSha256, modelExportSha256,
++    actionGridHash, patchSha256,
++    scenarioSha256, bindings, metrics);
++
++  Simulator::Destroy ();
++  return 0;
++}
+diff --git a/examples/wscript b/examples/wscript
+index 0107ae7..5eacf8b 100644
+--- a/examples/wscript
++++ b/examples/wscript
+@@ -9,6 +9,10 @@ def build(bld):
+     obj.source = [
+           'cttc-nr-wifi-interference.cc',
+                  ]
++    obj = bld.create_ns3_program('dblbt-nru-wifi-validation', ['nr', 'nr-u', 'wifi', 'flow-monitor', 'stats', 'spectrum', 'applications', 'internet'])
++    obj.source = [
++          'dblbt-nru-wifi-validation.cc',
++                 ]
+     obj = bld.create_ns3_program('cttc-coexistence-indoor-scenario', ['nr', 'nr-u', 'wifi-80211ad-nist', 'flow-monitor', 'stats'])
+     obj.source = [
+           'cttc-coexistence-indoor-scenario.cc',
+diff --git a/model/db-lbt-local-controller.cc b/model/db-lbt-local-controller.cc
+new file mode 100644
+index 0000000..53b14ac
+--- /dev/null
++++ b/model/db-lbt-local-controller.cc
+@@ -0,0 +1,651 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++
++#include "db-lbt-local-controller.h"
++
++#include "ns3/abort.h"
++#include "ns3/log.h"
++#include "ns3/simulator.h"
++
++#include <algorithm>
++#include <atomic>
++#include <cmath>
++#include <fstream>
++#include <limits>
++#include <numeric>
++#include <sstream>
++#include <stdexcept>
++
++namespace ns3 {
++
++NS_LOG_COMPONENT_DEFINE ("DbLbtLocalController");
++NS_OBJECT_ENSURE_REGISTERED (DbLbtLocalController);
++
++namespace {
++
++const char *g_gridHash =
++  "558da7340dfa32d8cc484ba68a05951314936d7aff34a145cc34ea051c07707c";
++std::atomic<uint64_t> g_nextStateId {0};
++
++void
++RequireToken (std::istream &input, const std::string &expected)
++{
++  std::string actual;
++  input >> actual;
++  if (!input || actual != expected)
++    {
++      throw std::runtime_error ("expected model token " + expected);
++    }
++}
++
++uint32_t
++ReadUint (std::istream &input, const std::string &name)
++{
++  uint32_t value;
++  input >> value;
++  if (!input)
++    {
++      throw std::runtime_error ("invalid model integer " + name);
++    }
++  return value;
++}
++
++double
++ReadDouble (std::istream &input, const std::string &name)
++{
++  double value;
++  input >> value;
++  if (!input || !std::isfinite (value))
++    {
++      throw std::runtime_error ("invalid model number " + name);
++    }
++  return value;
++}
++
++} // namespace
++
++bool
++DbLbtLocalController::RecoveryProfile::operator== (
++  const RecoveryProfile &other) const
++{
++  return kappa == other.kappa && alpha == other.alpha &&
++         beta == other.beta && m == other.m && bInit == other.bInit;
++}
++
++TypeId
++DbLbtLocalController::GetTypeId ()
++{
++  static TypeId tid = TypeId ("ns3::DbLbtLocalController")
++    .SetParent<Object> ()
++    .SetGroupName ("nr-u")
++    .AddConstructor<DbLbtLocalController> ();
++  return tid;
++}
++
++DbLbtLocalController::DbLbtLocalController ()
++  : m_rng (CreateObject<UniformRandomVariable> ())
++{
++  m_stateId = "dblbt-state-" + std::to_string (++g_nextStateId);
++}
++
++std::vector<DbLbtLocalController::RecoveryProfile>
++DbLbtLocalController::Profiles ()
++{
++  std::vector<RecoveryProfile> profiles;
++  profiles.reserve (NumArms);
++  for (uint32_t kappa : {5u, 7u})
++    {
++      for (uint32_t beta : {2u, 3u})
++        {
++          for (uint32_t m : {4u, 6u, 10u})
++            {
++              for (uint32_t initial : {15u, 31u})
++                {
++                  profiles.push_back ({kappa, 11, beta, m, initial});
++                }
++            }
++        }
++    }
++  return profiles;
++}
++
++void
++DbLbtLocalController::ConfigureTmc ()
++{
++  m_policy = Policy::Tmc;
++  m_profile = {7, 11, 3, 6, 15};
++  m_lastAttemptEnd = Simulator::Now ();
++}
++
++void
++DbLbtLocalController::ConfigureAdaptive (
++  const std::string &modelPath,
++  const std::string &expectedModelHash,
++  const std::string &expectedGridHash)
++{
++  LoadModel (modelPath, expectedModelHash, expectedGridHash);
++  m_policy = Policy::Adaptive;
++  m_profile = {7, 11, 3, 6, 15};
++  m_lastAttemptEnd = Simulator::Now ();
++}
++
++int64_t
++DbLbtLocalController::AssignStreams (int64_t stream)
++{
++  m_rng->SetStream (stream);
++  return 1;
++}
++
++uint32_t
++DbLbtLocalController::NextBackoff (uint32_t currentCw)
++{
++  NS_UNUSED (currentCw);
++  NS_ABORT_MSG_IF (m_policy == Policy::Unconfigured,
++                   "DB-LBT controller is not configured");
++  uint32_t selected;
++  if (!m_initialized)
++    {
++      selected = m_rng->GetInteger (0, m_profile.bInit);
++    }
++  else if (m_retries % m_profile.kappa < m_profile.beta)
++    {
++      selected = m_profile.alpha + m_interruptions;
++      m_interruptions = 0;
++    }
++  else
++    {
++      selected = m_rng->GetInteger (0, m_profile.m);
++    }
++  m_selectedBackoff = selected;
++  m_attemptStart = Simulator::Now ();
++  m_attemptBusyUs = 0.0;
++  m_attemptEffectiveDataUs = 0.0;
++  m_attemptAccessDelayUs = 0.0;
++  m_attemptActive = true;
++  return selected;
++}
++
++void
++DbLbtLocalController::NotifyBusy (Time duration)
++{
++  NS_ABORT_MSG_IF (duration.IsNegative () || duration.IsZero (),
++                   "busy duration must be positive");
++  ++m_interruptions;
++  if (m_attemptActive)
++    {
++      m_attemptBusyUs += duration.GetMicroSeconds ();
++    }
++}
++
++void
++DbLbtLocalController::NotifyGrant (Time duration)
++{
++  NS_UNUSED (duration);
++  if (m_attemptActive)
++    {
++      m_attemptAccessDelayUs =
++        (Simulator::Now () - m_attemptStart).GetMicroSeconds ();
++    }
++}
++
++void
++DbLbtLocalController::NotifyOwnTx (Time duration)
++{
++  NS_ABORT_MSG_IF (duration.IsNegative () || duration.IsZero (),
++                   "own transmission duration must be positive");
++  if (m_attemptActive)
++    {
++      m_attemptEffectiveDataUs += duration.GetMicroSeconds ();
++    }
++}
++
++void
++DbLbtLocalController::NotifyArrival (uint32_t count)
++{
++  NS_ABORT_MSG_IF (count > std::numeric_limits<uint32_t>::max () -
++                             m_pendingArrivals,
++                   "local arrival counter overflow");
++  m_pendingArrivals += count;
++}
++
++void
++DbLbtLocalController::SetQueueOccupancy (double ratio)
++{
++  NS_ABORT_MSG_IF (!std::isfinite (ratio) || ratio < 0.0 || ratio > 1.0,
++                   "queue occupancy must be a finite ratio");
++  m_queueOccupancy = ratio;
++}
++
++void
++DbLbtLocalController::NotifyOutcome (bool success)
++{
++  if (!m_attemptActive)
++    {
++      return;
++    }
++  double elapsedUs =
++    (Simulator::Now () - m_lastAttemptEnd).GetMicroSeconds ();
++  NS_ABORT_MSG_IF (elapsedUs <= 0.0,
++                   "local attempt elapsed time must be positive");
++  AttemptRecord attempt;
++  attempt.success = success;
++  attempt.elapsedUs = elapsedUs;
++  attempt.busyUs = std::min (m_attemptBusyUs, elapsedUs);
++  attempt.interruptions = m_interruptions;
++  attempt.accessDelayUs = m_attemptAccessDelayUs;
++  attempt.queueOccupancy = m_queueOccupancy;
++  attempt.arrivals = m_pendingArrivals;
++  attempt.retries = success ? 0 : m_retries + 1;
++  attempt.effectiveDataUs =
++    std::min (m_attemptEffectiveDataUs, elapsedUs);
++  attempt.selectedBackoff = m_selectedBackoff;
++  RecordAttempt (attempt);
++  m_pendingArrivals = 0;
++  m_attemptBusyUs = 0.0;
++  m_attemptEffectiveDataUs = 0.0;
++  m_attemptAccessDelayUs = 0.0;
++  m_attemptActive = false;
++  m_lastAttemptEnd = Simulator::Now ();
++}
++
++void
++DbLbtLocalController::RecordAttempt (const AttemptRecord &attempt)
++{
++  NS_ABORT_MSG_IF (
++    !std::isfinite (attempt.elapsedUs) || attempt.elapsedUs <= 0.0 ||
++      !std::isfinite (attempt.busyUs) || attempt.busyUs < 0.0 ||
++      attempt.busyUs > attempt.elapsedUs ||
++      !std::isfinite (attempt.accessDelayUs) || attempt.accessDelayUs < 0.0 ||
++      !std::isfinite (attempt.queueOccupancy) ||
++      attempt.queueOccupancy < 0.0 || attempt.queueOccupancy > 1.0 ||
++      !std::isfinite (attempt.effectiveDataUs) ||
++      attempt.effectiveDataUs < 0.0 ||
++      attempt.effectiveDataUs > attempt.elapsedUs,
++    "invalid local DB-LBT attempt");
++
++  if (attempt.success)
++    {
++      m_initialized = true;
++      m_retries = 0;
++    }
++  else
++    {
++      ++m_retries;
++    }
++  ++m_attemptCount;
++  m_window.push_back (attempt);
++  if (m_window.size () > 64)
++    {
++      m_window.pop_front ();
++    }
++  m_interval.push_back (attempt);
++  m_attempts.push_back (attempt);
++  if (m_policy == Policy::Adaptive &&
++      m_attemptCount >= ColdStartAttempts &&
++      m_attemptCount % DecisionInterval == 0)
++    {
++      Decide ();
++    }
++}
++
++uint32_t
++DbLbtLocalController::GetAlpha () const
++{
++  return 11;
++}
++
++const std::string &
++DbLbtLocalController::GetStateId () const
++{
++  return m_stateId;
++}
++
++const DbLbtLocalController::RecoveryProfile &
++DbLbtLocalController::GetCurrentProfile () const
++{
++  return m_profile;
++}
++
++const std::vector<DbLbtLocalController::DecisionRecord> &
++DbLbtLocalController::GetDecisions () const
++{
++  return m_decisions;
++}
++
++const std::vector<DbLbtLocalController::AttemptRecord> &
++DbLbtLocalController::GetAttempts () const
++{
++  return m_attempts;
++}
++
++void
++DbLbtLocalController::LoadModel (
++  const std::string &modelPath,
++  const std::string &expectedModelHash,
++  const std::string &expectedGridHash)
++{
++  NS_ABORT_MSG_IF (expectedGridHash != g_gridHash,
++                   "unexpected DB-LBT action-grid hash");
++  std::ifstream input (modelPath);
++  NS_ABORT_MSG_IF (!input, "cannot open DB-LBT model " << modelPath);
++  try
++    {
++      RequireToken (input, "dblbt_ns3_model");
++      NS_ABORT_MSG_IF (ReadUint (input, "magic version") != 1,
++                       "unsupported DB-LBT model magic");
++      RequireToken (input, "schema_version");
++      NS_ABORT_MSG_IF (ReadUint (input, "schema version") != 1,
++                       "unsupported DB-LBT model schema");
++      RequireToken (input, "num_arms");
++      NS_ABORT_MSG_IF (ReadUint (input, "num arms") != NumArms,
++                       "DB-LBT model must contain 24 arms");
++      RequireToken (input, "context_dim");
++      NS_ABORT_MSG_IF (ReadUint (input, "context dim") != ContextDim,
++                       "DB-LBT model must contain 11 features");
++      RequireToken (input, "ridge");
++      NS_ABORT_MSG_IF (ReadDouble (input, "ridge") <= 0.0,
++                       "DB-LBT ridge must be positive");
++      RequireToken (input, "exploration");
++      m_exploration = ReadDouble (input, "exploration");
++      NS_ABORT_MSG_IF (m_exploration < 0.0,
++                       "DB-LBT exploration must be non-negative");
++      RequireToken (input, "action_grid_hash");
++      input >> m_gridHash;
++      NS_ABORT_MSG_IF (m_gridHash != expectedGridHash,
++                       "DB-LBT action-grid hash mismatch");
++      RequireToken (input, "source_model_sha256");
++      input >> m_modelHash;
++      NS_ABORT_MSG_IF (m_modelHash != expectedModelHash,
++                       "DB-LBT source model hash mismatch");
++      RequireToken (input, "profiles");
++      NS_ABORT_MSG_IF (ReadUint (input, "profile count") != NumArms,
++                       "DB-LBT profile count mismatch");
++      const auto profiles = Profiles ();
++      for (uint32_t arm = 0; arm < NumArms; ++arm)
++        {
++          RequireToken (input, "profile");
++          NS_ABORT_MSG_IF (ReadUint (input, "profile index") != arm,
++                           "DB-LBT profile order mismatch");
++          RecoveryProfile profile {
++            ReadUint (input, "kappa"),
++            ReadUint (input, "alpha"),
++            ReadUint (input, "beta"),
++            ReadUint (input, "m"),
++            ReadUint (input, "b_init")};
++          NS_ABORT_MSG_IF (!(profile == profiles.at (arm)),
++                           "DB-LBT profile grid mismatch");
++        }
++      RequireToken (input, "A_rows");
++      NS_ABORT_MSG_IF (ReadUint (input, "A rows") != NumArms * ContextDim,
++                       "DB-LBT A row count mismatch");
++      for (uint32_t arm = 0; arm < NumArms; ++arm)
++        {
++          for (uint32_t row = 0; row < ContextDim; ++row)
++            {
++              RequireToken (input, "A");
++              NS_ABORT_MSG_IF (ReadUint (input, "A arm") != arm ||
++                                 ReadUint (input, "A row") != row,
++                               "DB-LBT A row order mismatch");
++              for (double &value : m_model.at (arm).A.at (row))
++                {
++                  value = ReadDouble (input, "A value");
++                }
++            }
++        }
++      RequireToken (input, "b_rows");
++      NS_ABORT_MSG_IF (ReadUint (input, "b rows") != NumArms,
++                       "DB-LBT b row count mismatch");
++      for (uint32_t arm = 0; arm < NumArms; ++arm)
++        {
++          RequireToken (input, "b");
++          NS_ABORT_MSG_IF (ReadUint (input, "b arm") != arm,
++                           "DB-LBT b row order mismatch");
++          for (double &value : m_model.at (arm).b)
++            {
++              value = ReadDouble (input, "b value");
++            }
++          Context zero {};
++          Solve (m_model.at (arm).A, zero);
++        }
++      RequireToken (input, "end");
++      std::string extra;
++      NS_ABORT_MSG_IF (input >> extra, "DB-LBT model contains extra data");
++    }
++  catch (const std::exception &error)
++    {
++      NS_ABORT_MSG ("invalid DB-LBT model: " << error.what ());
++    }
++}
++
++void
++DbLbtLocalController::Decide ()
++{
++  Context context = BuildContext ();
++  double reward = IntervalReward (context);
++  if (m_currentArm >= 0)
++    {
++      UpdateArm (static_cast<uint32_t> (m_currentArm),
++                 m_decisionContext, reward);
++    }
++  uint32_t arm = SelectArm (context);
++  m_currentArm = static_cast<int32_t> (arm);
++  m_profile = Profiles ().at (arm);
++  m_decisionContext = context;
++  m_decisions.push_back ({m_attemptCount, arm, m_profile, context, reward});
++  m_interval.clear ();
++}
++
++DbLbtLocalController::Context
++DbLbtLocalController::BuildContext () const
++{
++  Context context {};
++  if (m_window.empty ())
++    {
++      return context;
++    }
++  double count = static_cast<double> (m_window.size ());
++  double collisions = 0.0;
++  double elapsed = 0.0;
++  double busy = 0.0;
++  double interruptions = 0.0;
++  double queue = 0.0;
++  double arrivals = 0.0;
++  double retries = 0.0;
++  double effective = 0.0;
++  std::vector<double> delays;
++  for (const auto &attempt : m_window)
++    {
++      collisions += attempt.success ? 0.0 : 1.0;
++      elapsed += attempt.elapsedUs;
++      busy += attempt.busyUs;
++      interruptions += attempt.interruptions;
++      queue += attempt.queueOccupancy;
++      arrivals += attempt.arrivals;
++      retries += attempt.retries;
++      effective += attempt.effectiveDataUs;
++      if (attempt.success)
++        {
++          delays.push_back (attempt.accessDelayUs);
++        }
++    }
++  double meanInterruptions = interruptions / count;
++  double contenders = std::min (std::max (1.0 + meanInterruptions, 1.0), 32.0);
++  double delayCapacity = 16000.0 * contenders;
++  double ewma = 0.0;
++  double p95 = 0.0;
++  if (!delays.empty ())
++    {
++      ewma = delays.front ();
++      for (size_t index = 1; index < delays.size (); ++index)
++        {
++          ewma = 0.8 * ewma + 0.2 * delays.at (index);
++        }
++      std::sort (delays.begin (), delays.end ());
++      size_t rank = static_cast<size_t> (std::ceil (0.95 * delays.size ())) - 1;
++      p95 = delays.at (rank);
++    }
++  double meanRetries = retries / count;
++  context = {
++    Clip (collisions / count),
++    Clip ((count - collisions) / count),
++    Clip (busy / elapsed),
++    Clip (meanInterruptions / 31.0),
++    Clip (ewma / delayCapacity),
++    Clip (p95 / delayCapacity),
++    Clip (queue / count),
++    Clip (arrivals / (elapsed / 1000.0) / 0.1),
++    Clip (meanRetries / (1.0 + meanRetries)),
++    Clip (effective / elapsed),
++    Clip ((contenders - 1.0) / 31.0)};
++  return context;
++}
++
++double
++DbLbtLocalController::IntervalReward (const Context &context) const
++{
++  if (m_interval.empty ())
++    {
++      return 0.0;
++    }
++  double elapsed = 0.0;
++  double effective = 0.0;
++  double otherBusy = 0.0;
++  double collisions = 0.0;
++  std::vector<double> delays;
++  for (const auto &attempt : m_interval)
++    {
++      elapsed += attempt.elapsedUs;
++      effective += attempt.effectiveDataUs;
++      otherBusy += attempt.busyUs;
++      collisions += attempt.success ? 0.0 : 1.0;
++      if (attempt.success)
++        {
++          delays.push_back (attempt.accessDelayUs);
++        }
++    }
++  double p95 = 0.0;
++  if (!delays.empty ())
++    {
++      std::sort (delays.begin (), delays.end ());
++      size_t rank = static_cast<size_t> (std::ceil (0.95 * delays.size ())) - 1;
++      p95 = delays.at (rank);
++    }
++  double contenders = context.at (10) * 31.0 + 1.0;
++  double airtimeUtility = Clip (contenders * effective / elapsed);
++  double delayUtility = 1.0 - Clip (p95 / (16000.0 * contenders));
++  double denominator = effective + otherBusy;
++  double localShare = denominator > 0.0 ? effective / denominator : 0.0;
++  double targetShare = 1.0 / contenders;
++  double shareUtility =
++    1.0 - Clip (std::abs (localShare - targetShare) / targetShare);
++  double collisionProbability = collisions / m_interval.size ();
++  return (airtimeUtility + delayUtility + shareUtility) / 3.0 -
++         0.25 * collisionProbability;
++}
++
++uint32_t
++DbLbtLocalController::SelectArm (const Context &context) const
++{
++  uint32_t bestArm = 0;
++  double bestScore = -std::numeric_limits<double>::infinity ();
++  for (uint32_t arm = 0; arm < NumArms; ++arm)
++    {
++      Context estimate = Solve (m_model.at (arm).A, m_model.at (arm).b);
++      Context uncertainty = Solve (m_model.at (arm).A, context);
++      double exploitation = 0.0;
++      double variance = 0.0;
++      for (uint32_t index = 0; index < ContextDim; ++index)
++        {
++          exploitation += estimate.at (index) * context.at (index);
++          variance += context.at (index) * uncertainty.at (index);
++        }
++      double score = exploitation +
++                     m_exploration * std::sqrt (std::max (variance, 0.0));
++      NS_ABORT_MSG_IF (!std::isfinite (score), "non-finite DB-LBT score");
++      if (score > bestScore)
++        {
++          bestScore = score;
++          bestArm = arm;
++        }
++    }
++  return bestArm;
++}
++
++void
++DbLbtLocalController::UpdateArm (uint32_t arm,
++                                 const Context &context,
++                                 double reward)
++{
++  for (uint32_t row = 0; row < ContextDim; ++row)
++    {
++      for (uint32_t column = 0; column < ContextDim; ++column)
++        {
++          m_model.at (arm).A.at (row).at (column) +=
++            context.at (row) * context.at (column);
++        }
++      m_model.at (arm).b.at (row) += reward * context.at (row);
++    }
++}
++
++DbLbtLocalController::Context
++DbLbtLocalController::Solve (const Matrix &matrix,
++                             const Context &rightHandSide)
++{
++  Matrix lower {};
++  for (uint32_t row = 0; row < ContextDim; ++row)
++    {
++      for (uint32_t column = 0; column <= row; ++column)
++        {
++          double sum = matrix.at (row).at (column);
++          for (uint32_t k = 0; k < column; ++k)
++            {
++              sum -= lower.at (row).at (k) * lower.at (column).at (k);
++            }
++          if (row == column)
++            {
++              if (!(sum > 0.0) || !std::isfinite (sum))
++                {
++                  throw std::runtime_error ("model A is not positive definite");
++                }
++              lower.at (row).at (column) = std::sqrt (sum);
++            }
++          else
++            {
++              lower.at (row).at (column) =
++                sum / lower.at (column).at (column);
++            }
++        }
++    }
++  Context intermediate {};
++  for (uint32_t row = 0; row < ContextDim; ++row)
++    {
++      double sum = rightHandSide.at (row);
++      for (uint32_t column = 0; column < row; ++column)
++        {
++          sum -= lower.at (row).at (column) * intermediate.at (column);
++        }
++      intermediate.at (row) = sum / lower.at (row).at (row);
++    }
++  Context result {};
++  for (int32_t row = ContextDim - 1; row >= 0; --row)
++    {
++      double sum = intermediate.at (static_cast<size_t> (row));
++      for (uint32_t column = static_cast<uint32_t> (row + 1);
++           column < ContextDim;
++           ++column)
++        {
++          sum -= lower.at (column).at (static_cast<size_t> (row)) *
++                 result.at (column);
++        }
++      result.at (static_cast<size_t> (row)) =
++        sum / lower.at (static_cast<size_t> (row)).at (static_cast<size_t> (row));
++    }
++  return result;
++}
++
++double
++DbLbtLocalController::Clip (double value)
++{
++  return std::min (std::max (value, 0.0), 1.0);
++}
++
++} // namespace ns3
+diff --git a/model/db-lbt-local-controller.h b/model/db-lbt-local-controller.h
+new file mode 100644
+index 0000000..e47f9de
+--- /dev/null
++++ b/model/db-lbt-local-controller.h
+@@ -0,0 +1,145 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++
++#ifndef DB_LBT_LOCAL_CONTROLLER_H
++#define DB_LBT_LOCAL_CONTROLLER_H
++
++#include "ns3/nstime.h"
++#include "ns3/object.h"
++#include "ns3/random-variable-stream.h"
++
++#include <array>
++#include <cstdint>
++#include <deque>
++#include <string>
++#include <vector>
++
++namespace ns3 {
++
++class DbLbtLocalController : public Object
++{
++public:
++  static constexpr uint32_t NumArms = 24;
++  static constexpr uint32_t ContextDim = 11;
++  static constexpr uint32_t ColdStartAttempts = 8;
++  static constexpr uint32_t DecisionInterval = 32;
++
++  struct RecoveryProfile
++  {
++    uint32_t kappa {7};
++    uint32_t alpha {11};
++    uint32_t beta {3};
++    uint32_t m {6};
++    uint32_t bInit {15};
++
++    bool operator== (const RecoveryProfile &other) const;
++  };
++
++  struct AttemptRecord
++  {
++    bool success {false};
++    double elapsedUs {0.0};
++    double busyUs {0.0};
++    uint32_t interruptions {0};
++    double accessDelayUs {0.0};
++    double queueOccupancy {0.0};
++    uint32_t arrivals {0};
++    uint32_t retries {0};
++    double effectiveDataUs {0.0};
++    uint32_t selectedBackoff {0};
++  };
++
++  struct DecisionRecord
++  {
++    uint64_t attemptId {0};
++    uint32_t armId {0};
++    RecoveryProfile profile;
++    std::array<double, ContextDim> context {};
++    double reward {0.0};
++  };
++
++  static TypeId GetTypeId ();
++  DbLbtLocalController ();
++
++  static std::vector<RecoveryProfile> Profiles ();
++
++  void ConfigureTmc ();
++  void ConfigureAdaptive (const std::string &modelPath,
++                          const std::string &expectedModelHash,
++                          const std::string &expectedGridHash);
++  int64_t AssignStreams (int64_t stream);
++
++  uint32_t NextBackoff (uint32_t currentCw);
++  void NotifyBusy (Time duration);
++  void NotifyGrant (Time duration);
++  void NotifyOwnTx (Time duration);
++  void NotifyArrival (uint32_t count = 1);
++  void SetQueueOccupancy (double ratio);
++  void NotifyOutcome (bool success);
++  void RecordAttempt (const AttemptRecord &attempt);
++
++  uint32_t GetAlpha () const;
++  const std::string &GetStateId () const;
++  const RecoveryProfile &GetCurrentProfile () const;
++  const std::vector<DecisionRecord> &GetDecisions () const;
++  const std::vector<AttemptRecord> &GetAttempts () const;
++
++private:
++  using Context = std::array<double, ContextDim>;
++  using Matrix = std::array<Context, ContextDim>;
++
++  struct ArmState
++  {
++    Matrix A {};
++    Context b {};
++  };
++
++  enum class Policy
++  {
++    Unconfigured,
++    Tmc,
++    Adaptive
++  };
++
++  void LoadModel (const std::string &modelPath,
++                  const std::string &expectedModelHash,
++                  const std::string &expectedGridHash);
++  void Decide ();
++  Context BuildContext () const;
++  double IntervalReward (const Context &context) const;
++  uint32_t SelectArm (const Context &context) const;
++  void UpdateArm (uint32_t arm, const Context &context, double reward);
++  static Context Solve (const Matrix &matrix, const Context &rightHandSide);
++  static double Clip (double value);
++
++  Policy m_policy {Policy::Unconfigured};
++  Ptr<UniformRandomVariable> m_rng;
++  std::string m_stateId;
++  std::string m_modelHash;
++  std::string m_gridHash;
++  double m_exploration {0.5};
++  std::array<ArmState, NumArms> m_model {};
++  RecoveryProfile m_profile;
++  bool m_initialized {false};
++  uint32_t m_retries {0};
++  uint32_t m_interruptions {0};
++  uint32_t m_selectedBackoff {0};
++  uint32_t m_pendingArrivals {0};
++  double m_queueOccupancy {1.0};
++  double m_attemptBusyUs {0.0};
++  double m_attemptEffectiveDataUs {0.0};
++  double m_attemptAccessDelayUs {0.0};
++  Time m_lastAttemptEnd {Seconds (0)};
++  Time m_attemptStart {Seconds (0)};
++  bool m_attemptActive {false};
++  uint64_t m_attemptCount {0};
++  int32_t m_currentArm {-1};
++  Context m_decisionContext {};
++  std::deque<AttemptRecord> m_window;
++  std::vector<AttemptRecord> m_interval;
++  std::vector<AttemptRecord> m_attempts;
++  std::vector<DecisionRecord> m_decisions;
++};
++
++} // namespace ns3
++
++#endif // DB_LBT_LOCAL_CONTROLLER_H
+diff --git a/model/nr-db-lbt-access-manager.cc b/model/nr-db-lbt-access-manager.cc
+new file mode 100644
+index 0000000..da04b85
+--- /dev/null
++++ b/model/nr-db-lbt-access-manager.cc
+@@ -0,0 +1,206 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++
++#include "nr-db-lbt-access-manager.h"
++
++#include "ns3/abort.h"
++#include "ns3/log.h"
++#include "ns3/simulator.h"
++#include "ns3/string.h"
++#include "ns3/uinteger.h"
++
++#include <algorithm>
++
++namespace ns3 {
++
++NS_LOG_COMPONENT_DEFINE ("NrDbLbtAccessManager");
++NS_OBJECT_ENSURE_REGISTERED (NrDbLbtAccessManager);
++
++TypeId
++NrDbLbtAccessManager::GetTypeId ()
++{
++  static TypeId tid = TypeId ("ns3::NrDbLbtAccessManager")
++    .SetParent<NrLbtAccessManager> ()
++    .SetGroupName ("nr-u")
++    .AddConstructor<NrDbLbtAccessManager> ()
++    .AddAttribute ("Alpha",
++                   "Fixed deterministic backoff base; only 11 is valid.",
++                   UintegerValue (11),
++                   MakeUintegerAccessor (&NrDbLbtAccessManager::SetAlpha,
++                                         &NrDbLbtAccessManager::GetAlpha),
++                   MakeUintegerChecker<uint32_t> (11, 11))
++    .AddAttribute ("Policy",
++                   "DB-LBT policy: tmc or adaptive.",
++                   StringValue ("tmc"),
++                   MakeStringAccessor (&NrDbLbtAccessManager::m_policy),
++                   MakeStringChecker ())
++    .AddAttribute ("ModelPath",
++                   "Strict ASCII LinUCB model path for adaptive mode.",
++                   StringValue (""),
++                   MakeStringAccessor (&NrDbLbtAccessManager::m_modelPath),
++                   MakeStringChecker ())
++    .AddAttribute ("ModelSha256",
++                   "SHA-256 of the source fixed LinUCB NPZ.",
++                   StringValue (""),
++                   MakeStringAccessor (&NrDbLbtAccessManager::m_modelSha256),
++                   MakeStringChecker ())
++    .AddAttribute ("ActionGridHash",
++                   "SHA-256 of the preregistered 24-arm grid.",
++                   StringValue (
++                     "558da7340dfa32d8cc484ba68a05951314936d7aff34a145cc34ea051c07707c"),
++                   MakeStringAccessor (&NrDbLbtAccessManager::m_actionGridHash),
++                   MakeStringChecker ())
++    .AddTraceSource ("SelectedBackoff",
++                     "Backoff selected by this gNB's local state.",
++                     MakeTraceSourceAccessor (
++                       &NrDbLbtAccessManager::m_selectedBackoffTrace),
++                     "ns3::TracedCallback::Uint32Callback")
++    .AddTraceSource ("Interruption",
++                     "One notification for a local busy-period interruption.",
++                     MakeTraceSourceAccessor (
++                       &NrDbLbtAccessManager::m_interruptionTrace),
++                     "ns3::TracedCallback::Uint32Callback")
++    .AddTraceSource ("Outcome",
++                     "Local DL HARQ outcome for the pending access attempt.",
++                     MakeTraceSourceAccessor (&NrDbLbtAccessManager::m_outcomeTrace),
++                     "ns3::TracedCallback::BoolCallback");
++  return tid;
++}
++
++NrDbLbtAccessManager::NrDbLbtAccessManager ()
++  : m_controller (CreateObject<DbLbtLocalController> ())
++{
++}
++
++void
++NrDbLbtAccessManager::SetNrGnbMac (Ptr<NrGnbMac> mac)
++{
++  NrLbtAccessManager::SetNrGnbMac (mac);
++  GetNrGnbMac ()->TraceConnectWithoutContext (
++    "DlHarqFeedback",
++    MakeCallback (&NrDbLbtAccessManager::ObserveHarq, this));
++}
++
++int64_t
++NrDbLbtAccessManager::AssignStreams (int64_t stream)
++{
++  NrLbtAccessManager::AssignStreams (stream);
++  m_controller->AssignStreams (stream + 1);
++  return 2;
++}
++
++uint32_t
++NrDbLbtAccessManager::GetAlpha () const
++{
++  return m_alpha;
++}
++
++Ptr<DbLbtLocalController>
++NrDbLbtAccessManager::GetController () const
++{
++  return m_controller;
++}
++
++void
++NrDbLbtAccessManager::NotifyOwnTx (Time duration)
++{
++  if (m_attemptPending)
++    {
++      m_controller->NotifyOwnTx (duration);
++    }
++}
++
++void
++NrDbLbtAccessManager::DoInitialize ()
++{
++  NS_ABORT_MSG_IF (m_alpha != 11, "NR DB-LBT alpha must be exactly 11");
++  SetLbtState (IDLE);
++  m_backoffCount = 0;
++  if (m_policy == "tmc")
++    {
++      m_controller->ConfigureTmc ();
++    }
++  else if (m_policy == "adaptive")
++    {
++      NS_ABORT_MSG_IF (m_modelPath.empty () || m_modelSha256.empty (),
++                       "adaptive NR DB-LBT requires a fixed model and hash");
++      m_controller->ConfigureAdaptive (
++        m_modelPath, m_modelSha256, m_actionGridHash);
++    }
++  else
++    {
++      NS_ABORT_MSG ("unsupported NR DB-LBT policy " << m_policy);
++    }
++  NrLbtAccessManager::DoInitialize ();
++}
++
++uint32_t
++NrDbLbtAccessManager::GetBackoffSlots ()
++{
++  uint32_t selected = m_controller->NextBackoff (0);
++  m_attemptPending = true;
++  m_selectedBackoffTrace (selected);
++  return selected;
++}
++
++void
++NrDbLbtAccessManager::TransitionToBusy (Time duration)
++{
++  Time now = Simulator::Now ();
++  if (m_attemptPending && now >= m_reportedBusyEnd)
++    {
++      m_controller->NotifyBusy (duration);
++      m_interruptionTrace (1);
++    }
++  m_reportedBusyEnd = std::max (m_reportedBusyEnd, now + duration);
++  NrLbtAccessManager::TransitionToBusy (duration);
++}
++
++void
++NrDbLbtAccessManager::RequestAccessAfterDefer ()
++{
++  if (GetLbtState () != WAIT_FOR_DEFER)
++    {
++      return;
++    }
++  NrLbtAccessManager::RequestAccessAfterDefer ();
++}
++
++void
++NrDbLbtAccessManager::SetGrant ()
++{
++  if (m_waitForDeferEventId.IsRunning ())
++    {
++      m_waitForDeferEventId.Cancel ();
++    }
++  if (m_waitForBackoffEventId.IsRunning ())
++    {
++      m_waitForBackoffEventId.Cancel ();
++    }
++  if (m_attemptPending)
++    {
++      m_controller->NotifyGrant (GetMcot ());
++    }
++  NrLbtAccessManager::SetGrant ();
++}
++
++void
++NrDbLbtAccessManager::SetAlpha (uint32_t alpha)
++{
++  NS_ABORT_MSG_IF (alpha != 11, "NR DB-LBT alpha must be exactly 11");
++  m_alpha = alpha;
++}
++
++void
++NrDbLbtAccessManager::ObserveHarq (const DlHarqInfo &feedback)
++{
++  if (!m_attemptPending)
++    {
++      return;
++    }
++  bool success = feedback.IsReceivedOk ();
++  m_controller->NotifyOutcome (success);
++  m_outcomeTrace (success);
++  m_attemptPending = false;
++}
++
++} // namespace ns3
+diff --git a/model/nr-db-lbt-access-manager.h b/model/nr-db-lbt-access-manager.h
+new file mode 100644
+index 0000000..27152cc
+--- /dev/null
++++ b/model/nr-db-lbt-access-manager.h
+@@ -0,0 +1,54 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++
++#ifndef NR_DB_LBT_ACCESS_MANAGER_H
++#define NR_DB_LBT_ACCESS_MANAGER_H
++
++#include "db-lbt-local-controller.h"
++#include "nr-lbt-access-manager.h"
++
++#include "ns3/traced-callback.h"
++
++#include <string>
++
++namespace ns3 {
++
++class NrDbLbtAccessManager : public NrLbtAccessManager
++{
++public:
++  static TypeId GetTypeId ();
++  NrDbLbtAccessManager ();
++
++  void SetNrGnbMac (Ptr<NrGnbMac> mac) override;
++  int64_t AssignStreams (int64_t stream);
++  uint32_t GetAlpha () const;
++  Ptr<DbLbtLocalController> GetController () const;
++  void NotifyOwnTx (Time duration);
++
++protected:
++  void DoInitialize () override;
++  uint32_t GetBackoffSlots () override;
++  void TransitionToBusy (Time duration) override;
++  void RequestAccessAfterDefer () override;
++  void SetGrant () override;
++
++private:
++  void SetAlpha (uint32_t alpha);
++  void ObserveHarq (const DlHarqInfo &feedback);
++
++  uint32_t m_alpha {11};
++  std::string m_policy {"tmc"};
++  std::string m_modelPath;
++  std::string m_modelSha256;
++  std::string m_actionGridHash {
++    "558da7340dfa32d8cc484ba68a05951314936d7aff34a145cc34ea051c07707c"};
++  Ptr<DbLbtLocalController> m_controller;
++  bool m_attemptPending {false};
++  Time m_reportedBusyEnd {Seconds (0)};
++  TracedCallback<uint32_t> m_selectedBackoffTrace;
++  TracedCallback<uint32_t> m_interruptionTrace;
++  TracedCallback<bool> m_outcomeTrace;
++};
++
++} // namespace ns3
++
++#endif // NR_DB_LBT_ACCESS_MANAGER_H
+diff --git a/test/db-lbt-controller-test.cc b/test/db-lbt-controller-test.cc
+new file mode 100644
+index 0000000..d0b3e15
+--- /dev/null
++++ b/test/db-lbt-controller-test.cc
+@@ -0,0 +1,355 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++
++#include "../model/db-lbt-local-controller.h"
++#include "../model/nr-db-lbt-access-manager.h"
++#include "ns3/string.h"
++#include "ns3/simulator.h"
++#include "ns3/test.h"
++
++#include <cstdio>
++#include <fstream>
++#include <sstream>
++#include <string>
++
++namespace ns3 {
++
++class NrDbLbtAccessManagerProbe : public NrDbLbtAccessManager
++{
++public:
++  uint32_t DrawBackoff ()
++  {
++    return GetBackoffSlots ();
++  }
++
++  LbtState State () const
++  {
++    return GetLbtState ();
++  }
++
++  uint32_t RemainingBackoff () const
++  {
++    return GetCurrentBackoffCount ();
++  }
++
++  void ArmStaleAccessTimers ()
++  {
++    SetLbtState (WAIT_FOR_BACKOFF);
++    m_waitForDeferEventId = Simulator::Schedule (
++      Seconds (1), &NrDbLbtAccessManagerProbe::FireDefer, this);
++    m_waitForBackoffEventId = Simulator::Schedule (
++      Seconds (1), &NrDbLbtAccessManagerProbe::FireBackoff, this);
++  }
++
++  void Grant ()
++  {
++    SetGrant ();
++  }
++
++  bool DeferTimerRunning () const
++  {
++    return m_waitForDeferEventId.IsRunning ();
++  }
++
++  bool BackoffTimerRunning () const
++  {
++    return m_waitForBackoffEventId.IsRunning ();
++  }
++
++  void EnterBackoffAndFireStaleDefer ()
++  {
++    m_backoffCount = 11;
++    SetLbtState (WAIT_FOR_BACKOFF);
++    RequestAccessAfterDefer ();
++  }
++
++private:
++  void FireDefer ()
++  {
++    RequestAccessAfterDefer ();
++  }
++
++  void FireBackoff ()
++  {
++    RequestAccessAfterBackoff ();
++  }
++};
++
++class DbLbtControllerTestCase : public TestCase
++{
++public:
++  DbLbtControllerTestCase ()
++    : TestCase ("local DB-LBT controller preserves the frozen contract")
++  {
++  }
++
++private:
++  static std::string WriteModel ()
++  {
++    const std::string path = "/tmp/ns3-dblbt-controller-model.txt";
++    std::ofstream output (path, std::ios::out | std::ios::trunc);
++    output << "dblbt_ns3_model 1\n"
++           << "schema_version 1\n"
++           << "num_arms 24\n"
++           << "context_dim 11\n"
++           << "ridge 1\n"
++           << "exploration 0.5\n"
++           << "action_grid_hash "
++           << "558da7340dfa32d8cc484ba68a05951314936d7aff34a145cc34ea051c07707c\n"
++           << "source_model_sha256 " << std::string (64, 'a') << "\n"
++           << "profiles 24\n";
++    uint32_t arm = 0;
++    for (uint32_t kappa : {5u, 7u})
++      {
++        for (uint32_t beta : {2u, 3u})
++          {
++            for (uint32_t m : {4u, 6u, 10u})
++              {
++                for (uint32_t initial : {15u, 31u})
++                  {
++                    output << "profile " << arm++ << " " << kappa
++                           << " 11 " << beta << " " << m << " "
++                           << initial << "\n";
++                  }
++              }
++          }
++      }
++    output << "A_rows 264\n";
++    for (uint32_t modelArm = 0; modelArm < 24; ++modelArm)
++      {
++        for (uint32_t row = 0; row < 11; ++row)
++          {
++            output << "A " << modelArm << " " << row;
++            for (uint32_t column = 0; column < 11; ++column)
++              {
++                output << " " << (row == column ? 1 : 0);
++              }
++            output << "\n";
++          }
++      }
++    output << "b_rows 24\n";
++    for (uint32_t modelArm = 0; modelArm < 24; ++modelArm)
++      {
++        output << "b " << modelArm;
++        for (uint32_t column = 0; column < 11; ++column)
++          {
++            output << " 0";
++          }
++        output << "\n";
++      }
++    output << "end\n";
++    output.close ();
++    return path;
++  }
++
++  static DbLbtLocalController::AttemptRecord Attempt (bool success)
++  {
++    DbLbtLocalController::AttemptRecord attempt;
++    attempt.success = success;
++    attempt.elapsedUs = 1000.0;
++    attempt.busyUs = 200.0;
++    attempt.interruptions = 1;
++    attempt.accessDelayUs = 300.0;
++    attempt.queueOccupancy = 0.5;
++    attempt.arrivals = 1;
++    attempt.retries = success ? 0 : 1;
++    attempt.effectiveDataUs = success ? 700.0 : 0.0;
++    attempt.selectedBackoff = 11;
++    return attempt;
++  }
++
++  void DoRun () override
++  {
++    const std::string modelPath = WriteModel ();
++    const std::string modelHash (64, 'a');
++    const std::string gridHash =
++      "558da7340dfa32d8cc484ba68a05951314936d7aff34a145cc34ea051c07707c";
++
++    auto profiles = DbLbtLocalController::Profiles ();
++    NS_TEST_ASSERT_MSG_EQ (profiles.size (), 24,
++                           "adaptive grid does not contain 24 arms");
++    NS_TEST_ASSERT_MSG_EQ (profiles.at (0).kappa, 5,
++                           "first arm kappa changed");
++    NS_TEST_ASSERT_MSG_EQ (profiles.at (0).alpha, 11,
++                           "first arm alpha changed");
++    NS_TEST_ASSERT_MSG_EQ (profiles.at (0).beta, 2,
++                           "first arm beta changed");
++    NS_TEST_ASSERT_MSG_EQ (profiles.at (0).m, 4,
++                           "first arm m changed");
++    NS_TEST_ASSERT_MSG_EQ (profiles.at (0).bInit, 15,
++                           "first arm initial range changed");
++    NS_TEST_ASSERT_MSG_EQ (profiles.at (23).kappa, 7,
++                           "last arm kappa changed");
++    NS_TEST_ASSERT_MSG_EQ (profiles.at (23).beta, 3,
++                           "last arm beta changed");
++    NS_TEST_ASSERT_MSG_EQ (profiles.at (23).m, 10,
++                           "last arm m changed");
++    NS_TEST_ASSERT_MSG_EQ (profiles.at (23).bInit, 31,
++                           "last arm initial range changed");
++
++    Ptr<DbLbtLocalController> first = CreateObject<DbLbtLocalController> ();
++    Ptr<DbLbtLocalController> second = CreateObject<DbLbtLocalController> ();
++    first->ConfigureAdaptive (modelPath, modelHash, gridHash);
++    second->ConfigureAdaptive (modelPath, modelHash, gridHash);
++    NS_TEST_ASSERT_MSG_NE (first->GetStateId (), second->GetStateId (),
++                           "nodes share one adaptive state id");
++    NS_TEST_ASSERT_MSG_EQ (first->GetAlpha (), 11,
++                           "adaptive alpha is not fixed at 11");
++
++    for (uint32_t attempt = 0; attempt < 7; ++attempt)
++      {
++        first->RecordAttempt (Attempt (true));
++      }
++    NS_TEST_ASSERT_MSG_EQ (first->GetDecisions ().size (), 0,
++                           "decision occurred before eight own attempts");
++    for (uint32_t attempt = 7; attempt < 31; ++attempt)
++      {
++        first->RecordAttempt (Attempt (attempt % 5 != 0));
++      }
++    NS_TEST_ASSERT_MSG_EQ (first->GetDecisions ().size (), 0,
++                           "decision occurred before interval 32");
++    first->RecordAttempt (Attempt (true));
++    NS_TEST_ASSERT_MSG_EQ (first->GetDecisions ().size (), 1,
++                           "decision did not occur at own attempt 32");
++    const auto &decision = first->GetDecisions ().front ();
++    NS_TEST_ASSERT_MSG_EQ (decision.attemptId, 32,
++                           "decision boundary is not attempt 32");
++    NS_TEST_ASSERT_MSG_EQ (decision.armId, 0,
++                           "LinUCB tie did not choose the lowest arm");
++    NS_TEST_ASSERT_MSG_EQ (decision.profile.alpha, 11,
++                           "selected profile changed alpha");
++    NS_TEST_ASSERT_MSG_EQ (decision.context.size (), 11,
++                           "context does not contain exactly 11 fields");
++    NS_TEST_ASSERT_MSG_EQ (second->GetDecisions ().size (), 0,
++                           "one node mutated another node's model state");
++
++    Ptr<DbLbtLocalController> tmc = CreateObject<DbLbtLocalController> ();
++    tmc->ConfigureTmc ();
++    tmc->AssignStreams (91);
++    uint32_t initial = tmc->NextBackoff (15);
++    NS_TEST_ASSERT_MSG_EQ ((initial <= 15), true,
++                           "TMC initial backoff exceeded inclusive range");
++    tmc->RecordAttempt (Attempt (true));
++    tmc->NotifyBusy (MicroSeconds (20));
++    tmc->NotifyBusy (MicroSeconds (30));
++    NS_TEST_ASSERT_MSG_EQ (tmc->NextBackoff (15), 13,
++                           "TMC deterministic recovery is not alpha plus interruptions");
++    NS_TEST_ASSERT_MSG_EQ (tmc->GetCurrentProfile ().kappa, 7,
++                           "fixed TMC kappa changed");
++    NS_TEST_ASSERT_MSG_EQ (tmc->GetCurrentProfile ().beta, 3,
++                           "fixed TMC beta changed");
++    NS_TEST_ASSERT_MSG_EQ (tmc->GetCurrentProfile ().m, 6,
++                           "fixed TMC random range changed");
++
++    Ptr<DbLbtLocalController> traced = CreateObject<DbLbtLocalController> ();
++    traced->ConfigureTmc ();
++    traced->AssignStreams (92);
++    traced->NotifyOutcome (true);
++    NS_TEST_ASSERT_MSG_EQ (traced->GetAttempts ().size (), 0,
++                           "idle CW reset fabricated a local attempt");
++    traced->SetQueueOccupancy (0.75);
++    traced->NotifyArrival (3);
++    uint32_t selected = traced->NextBackoff (15);
++    Simulator::Schedule (MicroSeconds (10),
++                         &DbLbtLocalController::NotifyBusy,
++                         traced, MicroSeconds (20));
++    Simulator::Schedule (MicroSeconds (40),
++                         &DbLbtLocalController::NotifyGrant,
++                         traced, MicroSeconds (50));
++    Simulator::Schedule (MicroSeconds (50),
++                         &DbLbtLocalController::NotifyOwnTx,
++                         traced, MicroSeconds (50));
++    Simulator::Schedule (MicroSeconds (100),
++                         &DbLbtLocalController::NotifyOutcome,
++                         traced, true);
++    Simulator::Run ();
++    NS_TEST_ASSERT_MSG_EQ (traced->GetAttempts ().size (), 1,
++                           "trace callbacks did not form one own attempt");
++    const auto &observed = traced->GetAttempts ().front ();
++    NS_TEST_ASSERT_MSG_EQ_TOL (observed.elapsedUs, 100.0, 1e-12,
++                               "attempt elapsed time used non-local time");
++    NS_TEST_ASSERT_MSG_EQ_TOL (observed.busyUs, 20.0, 1e-12,
++                               "busy time did not come from local callback");
++    NS_TEST_ASSERT_MSG_EQ (observed.interruptions, 1,
++                           "busy callback did not count one interruption");
++    NS_TEST_ASSERT_MSG_EQ_TOL (observed.accessDelayUs, 40.0, 1e-12,
++                               "grant time did not form local access delay");
++    NS_TEST_ASSERT_MSG_EQ_TOL (observed.queueOccupancy, 0.75, 1e-12,
++                               "queue occupancy was not node local");
++    NS_TEST_ASSERT_MSG_EQ (observed.arrivals, 3,
++                           "arrival count was not node local");
++    NS_TEST_ASSERT_MSG_EQ_TOL (observed.effectiveDataUs, 50.0, 1e-12,
++                               "own PHY airtime was not recorded");
++    NS_TEST_ASSERT_MSG_EQ (observed.selectedBackoff, selected,
++                           "selected backoff was not bound to its attempt");
++    Simulator::Destroy ();
++
++    Ptr<NrDbLbtAccessManagerProbe> nrAdaptive =
++      CreateObject<NrDbLbtAccessManagerProbe> ();
++    nrAdaptive->SetAttribute ("Policy", StringValue ("adaptive"));
++    nrAdaptive->SetAttribute ("ModelPath", StringValue (modelPath));
++    nrAdaptive->SetAttribute ("ModelSha256", StringValue (modelHash));
++    nrAdaptive->SetAttribute ("ActionGridHash", StringValue (gridHash));
++    nrAdaptive->Initialize ();
++    NS_TEST_ASSERT_MSG_EQ (nrAdaptive->State (), NrLbtAccessManager::IDLE,
++                           "NR DB-LBT state was not initialized to IDLE");
++    NS_TEST_ASSERT_MSG_EQ (nrAdaptive->RemainingBackoff (), 0,
++                           "NR DB-LBT remaining backoff was not initialized");
++    NS_TEST_ASSERT_MSG_EQ (nrAdaptive->GetAlpha (), 11,
++                           "NR DB-LBT alpha is not fixed at 11");
++    NS_TEST_ASSERT_MSG_EQ ((nrAdaptive->DrawBackoff () <= 15), true,
++                           "NR manager did not delegate initial backoff");
++
++    Ptr<NrDbLbtAccessManagerProbe> nrSecond =
++      CreateObject<NrDbLbtAccessManagerProbe> ();
++    nrSecond->SetAttribute ("Policy", StringValue ("tmc"));
++    nrSecond->Initialize ();
++    NS_TEST_ASSERT_MSG_NE (
++      nrAdaptive->GetController ()->GetStateId (),
++      nrSecond->GetController ()->GetStateId (),
++      "NR gNBs share one controller state");
++
++    Ptr<NrDbLbtAccessManagerProbe> nrTimer =
++      CreateObject<NrDbLbtAccessManagerProbe> ();
++    nrTimer->SetAttribute ("Policy", StringValue ("tmc"));
++    nrTimer->Initialize ();
++    nrTimer->ArmStaleAccessTimers ();
++    NS_TEST_ASSERT_MSG_EQ (nrTimer->DeferTimerRunning (), true,
++                           "test did not arm the stale defer timer");
++    NS_TEST_ASSERT_MSG_EQ (nrTimer->BackoffTimerRunning (), true,
++                           "test did not arm the stale backoff timer");
++    nrTimer->Grant ();
++    NS_TEST_ASSERT_MSG_EQ (nrTimer->DeferTimerRunning (), false,
++                           "grant left a stale defer timer running");
++    NS_TEST_ASSERT_MSG_EQ (nrTimer->BackoffTimerRunning (), false,
++                           "grant left a stale backoff timer running");
++    Simulator::Destroy ();
++
++    Ptr<NrDbLbtAccessManagerProbe> nrStaleDefer =
++      CreateObject<NrDbLbtAccessManagerProbe> ();
++    nrStaleDefer->SetAttribute ("Policy", StringValue ("tmc"));
++    nrStaleDefer->Initialize ();
++    nrStaleDefer->EnterBackoffAndFireStaleDefer ();
++    NS_TEST_ASSERT_MSG_EQ (nrStaleDefer->State (),
++                           NrLbtAccessManager::WAIT_FOR_BACKOFF,
++                           "stale defer callback replaced active backoff state");
++    NS_TEST_ASSERT_MSG_EQ (nrStaleDefer->DeferTimerRunning (), false,
++                           "stale defer callback scheduled another defer timer");
++    Simulator::Destroy ();
++
++    std::remove (modelPath.c_str ());
++  }
++};
++
++class DbLbtControllerTestSuite : public TestSuite
++{
++public:
++  DbLbtControllerTestSuite ()
++    : TestSuite ("db-lbt-controller", UNIT)
++  {
++    AddTestCase (new DbLbtControllerTestCase, TestCase::QUICK);
++  }
++};
++
++static DbLbtControllerTestSuite g_dbLbtControllerTestSuite;
++
++} // namespace ns3
+diff --git a/wscript b/wscript
+index 5ae339e..6bd5d6d 100644
+--- a/wscript
++++ b/wscript
+@@ -10,6 +10,8 @@ def build(bld):
+ 
+     module = bld.create_ns3_module('nr-u', ['core', 'nr', 'spectrum', 'antenna', 'wifi'])
+     module.source = [
++          'model/db-lbt-local-controller.cc',
++          'model/nr-db-lbt-access-manager.cc',
+           'model/nr-on-off-access-manager.cc',
+           'model/nr-lbt-access-manager.cc',
+           'model/application-scenario.cc',
+@@ -33,11 +35,14 @@ def build(bld):
+ 
+     module_test = bld.create_ns3_module_test_library('nr-u')
+     module_test.source = [
++        'test/db-lbt-controller-test.cc',
+         ]
+ 
+     headers = bld(features='ns3header')
+     headers.module = 'nr-u'
+     headers.source = [
++          'model/db-lbt-local-controller.h',
++          'model/nr-db-lbt-access-manager.h',
+           'model/nr-on-off-access-manager.h',
+           'model/nr-lbt-access-manager.h',
+           'model/application-scenario.h',
+@@ -65,4 +70,3 @@ def build(bld):
+         bld.recurse('examples')
+ 
+     # bld.ns3_python_bindings()
+-

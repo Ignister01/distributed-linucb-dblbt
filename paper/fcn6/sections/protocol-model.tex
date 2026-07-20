@@ -1,0 +1,130 @@
+\section{Local Information and Protocol Abstraction}
+\label{sec:model}
+
+\subsection{Where Adaptation Enters}
+
+Let $\mathcal K=\mathcal K_{\mathrm W}\cup\mathcal K_{\mathrm N}$ contain
+the Wi-Fi APs and NR-U gNBs sharing one channel. Wi-Fi decrements a counter only
+after the applicable inter-frame deferral. NR-U category-4 LBT counts idle
+sensing slots and must also respect its priority class, maximum channel
+occupancy, and transmission-boundary alignment
+\cite{kosek2021downlink,3gpp37213}. DB-LBT acts after an ACK/HARQ outcome: it
+supplies the next recovery counter before either native access procedure starts.
+
+For a local countdown slot $\ell$, $c_k(\ell)$ evolves as
+\begin{equation}
+c_k(\ell+1)=
+\begin{cases}
+c_k(\ell)-1, & C_k(\ell)=0,\\
+c_k(\ell), & C_k(\ell)=1,
+\end{cases}
+\label{eq:countdown}
+\end{equation}
+where $C_k=1$ denotes a busy CCA sample. A maximal busy episode freezes the
+counter and increments the local interruption count $i_k$. In a mutually
+detectable collision domain, each successful peer contributes roughly one such
+episode per cycle, giving the operational estimate $\hat n_k\approx1+i_k$.
+
+\begin{figure}[!t]
+  \centering
+  \subfloat[Local observation and action boundary.]{%
+    \resizebox{\columnwidth}{!}{\input{figures/protocol-abstraction}}}\\[-1mm]
+  \subfloat[Insertion point in Wi-Fi and NR-U access.]{%
+    \resizebox{\columnwidth}{!}{\input{figures/access-timing}}}
+  \caption{Protocol-constrained adaptation. LinUCB selects only the next
+  DB-LBT recovery profile from local history. Native sensing, countdown,
+  synchronization, MCOT, and ACK/HARQ behavior remain unchanged.}
+  \label{fig:protocol}
+\end{figure}
+
+\subsection{From the Channel to Local Context}
+
+The received power from transmitter $j$ includes path loss, shadowing, and
+small-scale fading through gain $G_{jk}(t)$. LBT compresses their sum into a
+threshold decision, while the receiver compresses SINR $\gamma_k$ into an
+ACK/HARQ outcome:
+\begin{align}
+C_k(t)&=\mathbb 1\!\left\{N_k+\sum_{j\ne k}a_j(t)P_jG_{jk}(t)
+\geq\Gamma_k\right\},
+\label{eq:cca}\\
+\Pr\{Y_k=1\mid\gamma_k,u_k\}
+&=1-\mathrm{PER}_{\tau_k}(\gamma_k,u_k).
+\label{eq:success}
+\end{align}
+Both mappings are nonlinear. A small received-power change can flip CCA, and a
+failed attempt can reflect overlap, fading, hidden interference, or decoding.
+The learner receives protocol outcomes, not the underlying gains.
+
+Three assumptions recover the contention abstraction used by DB-LBT: (A1)
+every co-channel transmission exceeds every contender's CCA threshold; (A2)
+isolated reception succeeds with probability near one; and (A3) simultaneous
+transmissions have no capture. Under A1--A3,
+\begin{equation}
+\begin{aligned}
+C_k(\ell)&=\mathbb 1\!\left\{\sum_{j\ne k}a_j(\ell)>0\right\},\\
+Y_k(\ell)&=1\iff\sum_j a_j(\ell)=1.
+\end{aligned}
+\label{eq:reduction}
+\end{equation}
+One zero counter then succeeds and multiple zeros collide. This reduction
+explains why busy periods and interruptions carry contention information even
+though the radio channel itself is random.
+
+The context groups 11 quantities already available at an AP or gNB. Busy
+fraction and interruptions summarize $C_k$; success, failure, and
+retransmissions summarize $Y_k$; queue occupancy, arrivals, delay, and
+effective-data time describe demand and service.
+
+\begin{table}[!t]
+\caption{Local Context as Protocol Evidence}
+\label{tab:context}
+\centering
+\scriptsize
+\begin{tabularx}{\columnwidth}{@{}p{19mm}p{25mm}Y@{}}
+\toprule
+Feature group & Local protocol source & Regime cue \\
+\midrule
+Busy fraction, interruptions & CCA thresholding and countdown freezes & Active contenders or persistent occupancy. \\
+Success, failures, retries & ACK/HARQ and retransmission state & Service quality after attempted access. \\
+Queue, arrivals, delay & Local traffic and MAC service & Offered load and congestion. \\
+Effective-data time, busy share & Successful occupancy and NR-U alignment & Schedule efficiency and local share. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The feature groups respond at different moments in an access cycle. When
+several idle queues become active together, the first attempts expose the
+activation range through queue growth, delay, and early CCA freezes. Once the
+active set settles, repeated interruptions and retransmissions describe how
+well the deterministic and random recovery branches maintain spacing. A
+periodic external transmitter creates another pattern: busy fraction rises at
+regular intervals even when the peer population is unchanged. The controller
+does not have to label these causes. It only needs their local traces to rank
+the available recovery profiles.
+
+Let $z$ denote a MAC occupancy regime and $\bar x_k(z)$ its mean local
+context. Table~\ref{tab:context} shows why each feature group can change when
+load, active set, or external occupancy changes. Local information separates
+the actions that matter when
+\begin{equation}
+q^\star(z)\ne q^\star(z')
+\ \Longrightarrow\
+\|\bar x_k(z)-\bar x_k(z')\|_2\geq\delta_x>0.
+\label{eq:identifiability}
+\end{equation}
+
+Timing supplies the second condition. Five scales describe the operating
+region: $T_{\rm phy}$ for fast radio variation, $T_{\rm ctx}$ for context
+collection, $T_{\rm adapt}$ for one learning response, $T_{\rm dwell}$ for a
+regime, and $T_{\rm hor}$ for the operating horizon. The intended setting
+satisfies
+\begin{equation}
+T_{\rm phy}\ll T_{\rm ctx}\lesssim T_{\rm adapt}\ll T_{\rm dwell}
+<T_{\rm hor}.
+\label{eq:timescale}
+\end{equation}
+Fast randomness can then average into local history before the regime changes,
+while at least one change occurs soon enough to make adaptation useful.
+Equations~\eqref{eq:identifiability} and \eqref{eq:timescale} give local
+observations their precise role: they need only distinguish DB-LBT actions, not
+reconstruct the physical channel.

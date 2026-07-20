@@ -1,0 +1,19 @@
+Deterministic backoff with listen before talk (DB-LBT) uses local countdown
+interruptions to build collision-reduced Wi-Fi/NR-U access schedules. Its
+recovery parameters are normally fixed, although offered load, active
+contenders, and external occupancy change the backoff profile that works best.
+We formulate DB-LBT parameter adaptation as a protocol-constrained contextual
+bandit problem under locally observable MAC information. Each transmitter runs
+LinUCB over 24 legal $(\kappa,\beta,m,b_{\mathrm{init}})$ tuples. The context
+contains only local CCA, queue, delay, retransmission, and ACK/HARQ statistics;
+the selected action changes the next DB-LBT recovery counter but leaves native
+Wi-Fi and NR-U procedures intact.
+
+We derive the sensing, reception, separability, and timescale conditions that
+make this local context informative. Paired event experiments then compare
+adaptive DB-LBT with random LBT and fixed DB-LBT. In a static $4+4$ regime,
+adaptive and fixed TMC DB-LBT are numerically identical. Across held-out
+scenarios, adaptation raises mean utility from $0.926467$ to $0.928023$; the
+non-ideal gain is $0.289\%$. LinUCB also exceeds context-free UCB in the
+combined dynamic case. A packet-level ns-3 cross-check produces mixed
+technology-level directions and exposes the unresolved validation gap.

@@ -1,0 +1,61 @@
+% !TEX program = pdflatex
+\documentclass[conference]{IEEEtran}
+
+\usepackage{amsmath,amssymb}
+\usepackage{array}
+\usepackage{booktabs}
+\usepackage{cite}
+\usepackage{graphicx}
+\usepackage[caption=false,font=footnotesize]{subfig}
+\usepackage{siunitx}
+\usepackage{tabularx}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,fit,positioning}
+\usepackage{xcolor}
+\usepackage{url}
+\usepackage[hidelinks]{hyperref}
+
+\graphicspath{{figures/}}
+\sisetup{detect-all,group-separator={,},group-minimum-digits=4}
+\newcommand{\method}{Adaptive DB-LBT}
+\newcommand{\nru}{NR-U}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+\hypersetup{
+  pdftitle={Distributed LinUCB-Based Adaptive DB-LBT with Local Observations for Wi-Fi/NR-U Coexistence},
+  pdfauthor={Yikai Wang},
+  pdfkeywords={Wi-Fi, NR-U, coexistence, listen before talk, deterministic backoff, contextual bandit}
+}
+
+\title{Distributed LinUCB-Based Adaptive DB-LBT with Local Observations\\
+for Wi-Fi/NR-U Coexistence}
+
+\author{\IEEEauthorblockN{Yikai Wang}
+\IEEEauthorblockA{College of Electronics and Information Engineering\\
+Tongji University, Shanghai, China}}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+\input{sections/abstract}
+\end{abstract}
+
+\begin{IEEEkeywords}
+Wi-Fi, NR-U, coexistence, listen before talk, deterministic backoff,
+contextual bandit, local observation.
+\end{IEEEkeywords}
+
+\input{sections/introduction}
+\input{sections/related-work}
+\input{sections/protocol-model}
+\input{sections/adaptive-method}
+\input{sections/evaluation}
+\input{sections/discussion}
+\input{sections/conclusion}
+
+\IEEEtriggeratref{4}
+\bibliographystyle{IEEEtran}
+\bibliography{references}
+
+\end{document}

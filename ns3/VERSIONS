@@ -1,0 +1,10 @@
+ns3_repo=https://gitlab.com/nsnam/ns-3-dev.git
+ns3_ref=ns-3.35
+ns3_tag_object=020c5f533253c98ee805b715d3efbd559a0ac7b4
+ns3_commit=ac88b75eac1818c673cf2c939a96ac3005b1f051
+nr_repo=https://gitlab.com/cttc-lena/nr.git
+nr_release=5g-lena-v1.2.y
+nr_ref=fe0a1d2a5fb7d1547e46042041288a684893ba9e
+nru_repo=https://gitlab.com/cttc-lena/nr-u.git
+nru_ref=75a45143b1cd382326876a9597e856338673039a
+official_example=cttc-nr-wifi-interference

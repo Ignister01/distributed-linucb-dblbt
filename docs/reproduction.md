@@ -1,0 +1,160 @@
+# Reproduction Guide
+
+Public repository:
+`https://github.com/Ignister01/distributed-linucb-dblbt`
+
+```bash
+git clone https://github.com/Ignister01/distributed-linucb-dblbt.git
+cd distributed-linucb-dblbt
+```
+
+## Environment
+
+Use WSL2 Ubuntu 24.04, Python 3.12, GCC/G++ 11, and at least 40 GiB free for a
+fresh complete event run. From the repository root:
+
+```bash
+bash scripts/bootstrap_linux.sh
+```
+
+The Python environment is stored on WSL ext4 and exposed through `.venv`. The
+project source, models, raw records, databases, figures, and tables remain in
+this project directory.
+
+## Event-Level Experiment
+
+Run the smoke gate first:
+
+```bash
+bash scripts/run_smoke.sh
+```
+
+Run or resume the complete 792-job pretraining and 940-job formal experiment:
+
+```bash
+DBLBT_WORKERS=8 bash scripts/run_overnight.sh 2>&1 | tee logs/overnight.log
+```
+
+Observed formal resource use was about 7.06 hours with contingency and 6.87
+GiB of raw output. Valid jobs resume from immutable manifests; do not delete
+`runs/pretrain` or `runs/formal` to restart an interrupted run.
+
+## Official ns-3 Gate
+
+The official unmodified coexistence example gate is:
+
+```bash
+bash scripts/run_ns3_gate.sh
+```
+
+The accepted gate used ns-3.35 commit
+`ac88b75eac1818c673cf2c939a96ac3005b1f051`, 5G-LENA commit
+`fe0a1d2a5fb7d1547e46042041288a684893ba9e`, NR-U commit
+`75a45143b1cd382326876a9597e856338673039a`, and G++ 11.5.0.
+
+## Packet-Level Cross-Validation
+
+Run all stages, including the 27 jobs, strict audit, and metric reduction:
+
+```bash
+DBLBT_NS3_WORKERS=8 bash scripts/run_ns3_validation.sh all
+```
+
+If the databases already exist and only verification is needed:
+
+```bash
+bash scripts/run_ns3_validation.sh audit
+bash scripts/run_ns3_validation.sh reduce
+```
+
+The cached optimized runtime completed the 27-job matrix in 4 minutes 36
+seconds. A fresh source preparation and build is slower and depends on disk and
+compiler cache state. Raw formal SQLite databases occupy 26,521,600 bytes.
+
+The runner requires the pinned source checkouts under `ns3/worktree/ns-3-dev`
+when building a runtime. A different checkout location can be declared with
+`DBLBT_NS3_SOURCE_ROOT`. The built runtime is stored on WSL ext4 under
+`${XDG_CACHE_HOME:-$HOME/.cache}/dblbt-fcn/`.
+
+## H5 Cross-Model Evaluation
+
+Run the exact 3-scenario, 3-seed, 2-policy event match:
+
+```bash
+.venv/bin/dblbt-fcn sweep \
+  --matrix configs/matrices/ns3-cross-validation.yaml \
+  --workers 8 \
+  --output-dir runs/ns3-cross-validation \
+  --model models/linucb-initial.npz
+
+.venv/bin/dblbt-fcn summarize \
+  --manifest-dir runs/ns3-cross-validation/manifests \
+  --output results/tables/ns3-cross-validation-event.csv \
+  --workers 8
+```
+
+Generate the scenario agreement table, final hypotheses, LaTeX table, and H5
+audit metadata:
+
+```bash
+.venv/bin/dblbt-fcn cross-validate \
+  --event-summary results/tables/ns3-cross-validation-event.csv \
+  --ns3-metrics ns3/validation-results/scenario-metrics.csv \
+  --ns3-reduction ns3/validation-results/reduction.json \
+  --event-hypotheses results/figures/formal/tables/hypotheses.csv \
+  --output-dir results/tables
+```
+
+The observed event match required 160.6 seconds for simulation, 38.9 seconds
+for raw-backed summarization, and 47.6 seconds for a separate 18-run raw audit.
+Its retained raw/config/manifest directory occupies about 55.3 MiB.
+
+## Verification
+
+Run the full Python suite and shell syntax checks:
+
+```bash
+.venv/bin/python -m pytest -q
+bash -n scripts/run_ns3_gate.sh
+bash -n scripts/run_ns3_validation.sh
+git diff --check
+```
+
+Audit the 940-job event report without changing raw records:
+
+```bash
+.venv/bin/dblbt-fcn audit \
+  --manifest-dir runs/formal/manifests \
+  --summary results/tables/per-seed.csv \
+  --output-dir results/figures/formal \
+  --model models/linucb-initial.npz \
+  --oracle-arm-file models/fixed-oracle-arm.json \
+  --workers 16
+```
+
+The final expected hypothesis statuses are H1 `pass`, H2 `fail`, H3 `pass`,
+H4 `pass`, and H5 `inconclusive`.
+
+Verify the frozen final identities with:
+
+```bash
+sha256sum -c results/tables/final-artifacts.sha256
+```
+
+PDF container hashes can change when regenerated because Matplotlib embeds the
+generation time. Compare the corresponding PNG hashes for exact rendered
+figures. The overhead table is also expected to change because it measures
+live decision latency; its model identity and measurement protocol must remain
+fixed even when the measured microseconds vary.
+
+## Raw And Derived Boundaries
+
+Raw evidence consists of event gzip records and ns-3 SQLite databases. Config
+sidecars, completion markers, and manifests bind those raw files. CSV, JSON,
+LaTeX, PDF, and PNG outputs are derived and may be regenerated. Never replace
+raw packet-level metrics with event-level values, or vice versa.
+
+The public repository includes all 27 ns-3 SQLite databases and their
+manifests. The approximately 6.87 GiB event gzip records are excluded from Git
+and are regenerated by `scripts/run_overnight.sh`; the canonical per-seed event
+summary, configurations, model, figures, and integrity metadata are included.

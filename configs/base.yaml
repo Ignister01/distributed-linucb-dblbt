@@ -1,0 +1,23 @@
+simulation:
+  rounds: 100000
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+
+contention_windows:
+  ap:
+    cw_min: 15
+    cw_max: 63
+  gnb:
+    cw_min: 15
+    cw_max: 63
+  legacy_station:
+    cw_max: 1023
+
+channel:
+  sensing: ideal
+  hidden_nodes: false
+
+traffic:
+  kind: saturated

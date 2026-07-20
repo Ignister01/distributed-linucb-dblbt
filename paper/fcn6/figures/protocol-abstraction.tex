@@ -1,0 +1,26 @@
+\begin{tikzpicture}[
+  font=\footnotesize,
+  node distance=4mm,
+  block/.style={draw,rounded corners=1.5pt,align=center,minimum height=8mm,inner sep=2.5pt,text width=48mm},
+  env/.style={block,fill=gray!10},
+  obs/.style={block,fill=cyan!9},
+  learn/.style={block,fill=orange!12},
+  protocol/.style={block,fill=green!10},
+  arrow/.style={-{Latex[length=2mm]},thick}
+]
+\node[env] (env) {Radio environment\\$G_{jk}(t)$, traffic, other transmitters};
+\node[obs,below=of env] (cca) {Native sensing and decoding\\$C_k(t)$, ACK/HARQ $Y_k(t)$};
+\node[obs,below=of cca] (ctx) {Local history\\busy, interruptions, delay, queue, retries};
+\node[learn,below=of ctx] (agent) {Independent LinUCB\\select $(\kappa,\beta,m,b_{\rm init})$};
+\node[protocol,below=6mm of agent] (mac) {Unchanged access protocol\\Wi-Fi EDCA or NR-U Cat-4 LBT};
+
+\draw[arrow] (env) -- (cca);
+\draw[arrow] (cca) -- (ctx);
+\draw[arrow] (ctx) -- (agent);
+\draw[arrow] (agent) -- node[midway,right=1mm,align=left,font=\tiny,
+  fill=white,inner sep=0.5pt]{next recovery\\profile only} (mac);
+\draw[arrow] (mac.east) -- ++(8mm,0) |- node[pos=.25,right]{future attempts} (env.east);
+
+\node[draw,dashed,rounded corners=1.5pt,fit=(cca)(ctx)(agent)(mac),inner sep=2.5mm,
+  label={[align=center,font=\scriptsize]below:{Fixed outside learning: ED threshold, AIFS/defer, slot duration,\\MCOT, synchronization, MCS, and HARQ}}] {};
+\end{tikzpicture}

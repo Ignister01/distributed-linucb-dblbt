@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+message: "If you use this software or its experimental artifacts, please cite the associated paper."
+title: "Distributed LinUCB-Based Adaptive DB-LBT for Wi-Fi/NR-U Coexistence"
+type: software
+authors:
+  - family-names: Wang
+    given-names: Yikai
+repository-code: "https://github.com/Ignister01/distributed-linucb-dblbt"
+url: "https://github.com/Ignister01/distributed-linucb-dblbt"
+license: MIT
+version: 1.0.0
+date-released: 2026-07-20
+keywords:
+  - Wi-Fi
+  - NR-U
+  - listen before talk
+  - deterministic backoff
+  - contextual bandit
+  - LinUCB

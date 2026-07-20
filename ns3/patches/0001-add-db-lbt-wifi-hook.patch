@@ -1,0 +1,392 @@
+diff --git a/src/wifi/model/channel-access-manager.cc b/src/wifi/model/channel-access-manager.cc
+index 5b79362055bcef9000af3f3842dbbc6459b2e4d9..1c7ff0c85da0f47381a599c269fd189d379ea24b 100644
+--- a/src/wifi/model/channel-access-manager.cc
++++ b/src/wifi/model/channel-access-manager.cc
+@@ -617,8 +617,22 @@ ChannelAccessManager::NotifyMaybeCcaBusyStartNow (Time duration)
+ {
+   NS_LOG_FUNCTION (this << duration);
+   NS_LOG_DEBUG ("busy start for " << duration);
++  Time now = Simulator::Now ();
++  bool newBusyPeriod = now >= m_dbLbtBusyEnd;
+   UpdateBackoff ();
+-  m_lastBusyStart = Simulator::Now ();
++  if (newBusyPeriod)
++    {
++      for (const auto &txop : m_txops)
++        {
++          if (txop->GetAccessStatus () == Txop::REQUESTED ||
++              txop->GetBackoffSlots () > 0)
++            {
++              txop->NotifyDbLbtBusy (duration);
++            }
++        }
++    }
++  m_dbLbtBusyEnd = std::max (m_dbLbtBusyEnd, now + duration);
++  m_lastBusyStart = now;
+   m_lastBusyDuration = duration;
+ }
+ 
+diff --git a/src/wifi/model/channel-access-manager.h b/src/wifi/model/channel-access-manager.h
+index b52832af185996ca662ef81864ae40d749e7f48e..6fa69ec076b80582bb027601fd4a7be0bafa9938 100644
+--- a/src/wifi/model/channel-access-manager.h
++++ b/src/wifi/model/channel-access-manager.h
+@@ -307,6 +307,7 @@ private:
+   Time m_lastTxDuration;                 //!< the last transmit duration time
+   Time m_lastBusyStart;                  //!< the last busy start time
+   Time m_lastBusyDuration;               //!< the last busy duration time
++  Time m_dbLbtBusyEnd {Seconds (0)};      //!< end of the current DB-LBT busy period
+   Time m_lastSwitchingStart;             //!< the last switching start time
+   Time m_lastSwitchingDuration;          //!< the last switching duration time
+   bool m_sleeping;                       //!< flag whether it is in sleeping state
+diff --git a/src/wifi/model/txop.cc b/src/wifi/model/txop.cc
+index 0a3eaddab46c6033bcce2987395938aea8edbe2a..e294d49f3bc29bd7645782ab3096b624c573f8c7 100644
+--- a/src/wifi/model/txop.cc
++++ b/src/wifi/model/txop.cc
+@@ -116,6 +116,34 @@ Txop::DoDispose (void)
+   m_rng = 0;
+   m_txMiddle = 0;
+   m_channelAccessManager = 0;
++  m_dbLbtBackoffCallback.Nullify ();
++  m_dbLbtBusyCallback.Nullify ();
++  m_dbLbtOutcomeCallback.Nullify ();
++  m_dbLbtGrantCallback.Nullify ();
++}
++
++void
++Txop::SetDbLbtBackoffCallback (DbLbtBackoffCallback callback)
++{
++  m_dbLbtBackoffCallback = callback;
++}
++
++void
++Txop::SetDbLbtBusyCallback (DbLbtBusyCallback callback)
++{
++  m_dbLbtBusyCallback = callback;
++}
++
++void
++Txop::SetDbLbtOutcomeCallback (DbLbtOutcomeCallback callback)
++{
++  m_dbLbtOutcomeCallback = callback;
++}
++
++void
++Txop::SetDbLbtGrantCallback (DbLbtGrantCallback callback)
++{
++  m_dbLbtGrantCallback = callback;
+ }
+ 
+ void
+@@ -193,6 +221,10 @@ Txop::ResetCw (void)
+   NS_LOG_FUNCTION (this);
+   m_cw = GetMinCw ();
+   m_cwTrace = m_cw;
++  if (!m_dbLbtOutcomeCallback.IsNull ())
++    {
++      m_dbLbtOutcomeCallback (true);
++    }
+ }
+ 
+ void
+@@ -204,6 +236,10 @@ Txop::UpdateFailedCw (void)
+   // if the MU EDCA timer is running, CW cannot be less than MU CW min
+   m_cw = std::max (m_cw, GetMinCw ());
+   m_cwTrace = m_cw;
++  if (!m_dbLbtOutcomeCallback.IsNull ())
++    {
++      m_dbLbtOutcomeCallback (false);
++    }
+ }
+ 
+ uint32_t
+@@ -349,6 +385,10 @@ Txop::NotifyChannelAccessed (Time txopDuration)
+ {
+   NS_LOG_FUNCTION (this << txopDuration);
+   m_access = GRANTED;
++  if (!m_dbLbtGrantCallback.IsNull ())
++    {
++      m_dbLbtGrantCallback (txopDuration);
++    }
+ }
+ 
+ void
+@@ -376,11 +416,27 @@ void
+ Txop::GenerateBackoff (void)
+ {
+   NS_LOG_FUNCTION (this);
++  if (!m_dbLbtBackoffCallback.IsNull ())
++    {
++      m_backoff = m_dbLbtBackoffCallback (GetCw ());
++      m_backoffTrace (m_backoff);
++      StartBackoffNow (m_backoff);
++      return;
++    }
+   m_backoff = m_rng->GetInteger (0, GetCw ());
+   m_backoffTrace (m_backoff);
+   StartBackoffNow (m_backoff);
+ }
+ 
++void
++Txop::NotifyDbLbtBusy (Time duration)
++{
++  if (!m_dbLbtBusyCallback.IsNull ())
++    {
++      m_dbLbtBusyCallback (duration);
++    }
++}
++
+ void
+ Txop::NotifyChannelSwitching (void)
+ {
+diff --git a/src/wifi/model/txop.h b/src/wifi/model/txop.h
+index e9d67ef30a703ca9ff1a02974340c28f0f356daa..a64d6c57549435ea015921383c898bdcc2f530d5 100644
+--- a/src/wifi/model/txop.h
++++ b/src/wifi/model/txop.h
+@@ -86,6 +86,16 @@ public:
+    */
+   typedef Callback <void, WifiMacDropReason, Ptr<const WifiMacQueueItem> > DroppedMpdu;
+ 
++  typedef Callback<uint32_t, uint32_t> DbLbtBackoffCallback;
++  typedef Callback<void, Time> DbLbtBusyCallback;
++  typedef Callback<void, bool> DbLbtOutcomeCallback;
++  typedef Callback<void, Time> DbLbtGrantCallback;
++
++  void SetDbLbtBackoffCallback (DbLbtBackoffCallback callback);
++  void SetDbLbtBusyCallback (DbLbtBusyCallback callback);
++  void SetDbLbtOutcomeCallback (DbLbtOutcomeCallback callback);
++  void SetDbLbtGrantCallback (DbLbtGrantCallback callback);
++
+   /**
+    * Enumeration for channel access status
+    */
+@@ -288,6 +298,7 @@ protected:
+    * Generate a new backoff now.
+    */
+   virtual void GenerateBackoff (void);
++  void NotifyDbLbtBusy (Time duration);
+   /**
+    * Request access from Txop if needed.
+    */
+@@ -324,6 +335,10 @@ protected:
+ 
+   Ptr<ChannelAccessManager> m_channelAccessManager; //!< the channel access manager
+   DroppedMpdu m_droppedMpduCallback;                //!< the dropped MPDU callback
++  DbLbtBackoffCallback m_dbLbtBackoffCallback;
++  DbLbtBusyCallback m_dbLbtBusyCallback;
++  DbLbtOutcomeCallback m_dbLbtOutcomeCallback;
++  DbLbtGrantCallback m_dbLbtGrantCallback;
+   Ptr<WifiMacQueue> m_queue;                        //!< the wifi MAC queue
+   Ptr<MacTxMiddle> m_txMiddle;                      //!< the MacTxMiddle
+   Ptr<RegularWifiMac> m_mac;                        //!< the wifi MAC
+diff --git a/src/wifi/test/dblbt-hook-test.cc b/src/wifi/test/dblbt-hook-test.cc
+new file mode 100644
+index 0000000000000000000000000000000000000000..781d3ffe978f4b9f69192968df9ffd9069453d06
+--- /dev/null
++++ b/src/wifi/test/dblbt-hook-test.cc
+@@ -0,0 +1,189 @@
++/* -*- Mode:C++; c-file-style:"gnu"; indent-tabs-mode:nil; -*- */
++
++#include "ns3/object.h"
++#include "ns3/channel-access-manager.h"
++#include "ns3/random-variable-stream.h"
++#include "ns3/rng-seed-manager.h"
++#include "ns3/simulator.h"
++#include "ns3/test.h"
++#include "ns3/txop.h"
++
++#include <vector>
++
++namespace ns3 {
++
++class DbLbtHookProbe : public Txop
++{
++public:
++  void DrawBackoff ()
++  {
++    GenerateBackoff ();
++  }
++
++  uint32_t BackoffSlots () const
++  {
++    return GetBackoffSlots ();
++  }
++
++  void RequestForTest ()
++  {
++    NotifyAccessRequested ();
++  }
++};
++
++class DbLbtChannelAccessManagerStub : public ChannelAccessManager
++{
++private:
++  Time GetSifs () const override
++  {
++    return MicroSeconds (16);
++  }
++
++  Time GetSlot () const override
++  {
++    return MicroSeconds (9);
++  }
++
++  Time GetEifsNoDifs () const override
++  {
++    return MicroSeconds (44);
++  }
++};
++
++class DbLbtHookTestCase : public TestCase
++{
++public:
++  DbLbtHookTestCase ()
++    : TestCase ("disabled DB-LBT hook preserves stock Txop traces")
++  {
++  }
++
++private:
++  uint32_t SelectBackoff (uint32_t cw)
++  {
++    m_selectedCw = cw;
++    return 17;
++  }
++
++  void Busy (Time duration)
++  {
++    ++m_busyCalls;
++    m_busyDuration += duration;
++  }
++
++  void Outcome (bool success)
++  {
++    m_outcomes.push_back (success);
++  }
++
++  void Granted (Time duration)
++  {
++    ++m_grantCalls;
++    m_grantDuration = duration;
++  }
++
++  void BackoffTrace (uint32_t value)
++  {
++    m_trace.push_back (value);
++  }
++
++  void DoRun () override
++  {
++    RngSeedManager::SetSeed (410);
++    RngSeedManager::SetRun (1);
++
++    Ptr<UniformRandomVariable> reference =
++      CreateObject<UniformRandomVariable> ();
++    reference->SetStream (73);
++    Ptr<DbLbtHookProbe> stock = CreateObject<DbLbtHookProbe> ();
++    stock->SetMinCw (15);
++    stock->SetMaxCw (15);
++    stock->AssignStreams (73);
++    stock->TraceConnectWithoutContext (
++      "BackoffTrace", MakeCallback (&DbLbtHookTestCase::BackoffTrace, this));
++
++    for (uint32_t draw = 0; draw < 128; ++draw)
++      {
++        uint32_t expected = reference->GetInteger (0, 15);
++        stock->DrawBackoff ();
++        NS_TEST_ASSERT_MSG_EQ (stock->BackoffSlots (), expected,
++                               "disabled hook changed stock backoff bytes");
++        NS_TEST_ASSERT_MSG_EQ (m_trace.at (draw), expected,
++                               "disabled hook changed stock trace bytes");
++      }
++
++    Ptr<DbLbtHookProbe> hooked = CreateObject<DbLbtHookProbe> ();
++    hooked->SetMinCw (15);
++    hooked->SetMaxCw (15);
++    hooked->SetAifsn (2);
++    hooked->SetDbLbtBackoffCallback (
++      MakeCallback (&DbLbtHookTestCase::SelectBackoff, this));
++    hooked->SetDbLbtBusyCallback (
++      MakeCallback (&DbLbtHookTestCase::Busy, this));
++    hooked->SetDbLbtOutcomeCallback (
++      MakeCallback (&DbLbtHookTestCase::Outcome, this));
++    hooked->SetDbLbtGrantCallback (
++      MakeCallback (&DbLbtHookTestCase::Granted, this));
++    hooked->DrawBackoff ();
++    NS_TEST_ASSERT_MSG_EQ (hooked->BackoffSlots (), 17,
++                           "hook did not supply the selected backoff");
++    NS_TEST_ASSERT_MSG_EQ (m_selectedCw, 15,
++                           "hook did not receive the current CW");
++
++    Ptr<ChannelAccessManager> manager =
++      CreateObject<DbLbtChannelAccessManagerStub> ();
++    hooked->SetChannelAccessManager (manager);
++    hooked->RequestForTest ();
++    manager->NotifyMaybeCcaBusyStartNow (MicroSeconds (20));
++    manager->NotifyMaybeCcaBusyStartNow (MicroSeconds (30));
++    NS_TEST_ASSERT_MSG_EQ (m_busyCalls, 1,
++                           "overlapping CCA reports duplicated a busy period");
++    Simulator::Schedule (
++      MicroSeconds (31),
++      &ChannelAccessManager::NotifyMaybeCcaBusyStartNow,
++      manager,
++      MicroSeconds (10));
++    Simulator::Run ();
++    NS_TEST_ASSERT_MSG_EQ (m_busyCalls, 2,
++                           "a later busy period was not reported");
++    NS_TEST_ASSERT_MSG_EQ (m_busyDuration, MicroSeconds (30),
++                           "busy callback did not preserve first durations");
++
++    hooked->UpdateFailedCw ();
++    hooked->ResetCw ();
++    NS_TEST_ASSERT_MSG_EQ (m_outcomes.size (), 2,
++                           "outcome callbacks were not emitted once each");
++    NS_TEST_ASSERT_MSG_EQ (m_outcomes.at (0), false,
++                           "failed CW update was not reported as failure");
++    NS_TEST_ASSERT_MSG_EQ (m_outcomes.at (1), true,
++                           "CW reset was not reported as success");
++    hooked->NotifyChannelAccessed (MicroSeconds (123));
++    NS_TEST_ASSERT_MSG_EQ (m_grantCalls, 1,
++                           "grant callback was not emitted once");
++    NS_TEST_ASSERT_MSG_EQ (m_grantDuration, MicroSeconds (123),
++                           "grant callback changed the duration");
++    Simulator::Destroy ();
++  }
++
++  uint32_t m_selectedCw {0};
++  uint32_t m_busyCalls {0};
++  uint32_t m_grantCalls {0};
++  Time m_busyDuration {Seconds (0)};
++  Time m_grantDuration {Seconds (0)};
++  std::vector<bool> m_outcomes;
++  std::vector<uint32_t> m_trace;
++};
++
++class DbLbtHookTestSuite : public TestSuite
++{
++public:
++  DbLbtHookTestSuite ()
++    : TestSuite ("dblbt-hook", UNIT)
++  {
++    AddTestCase (new DbLbtHookTestCase, TestCase::QUICK);
++  }
++};
++
++static DbLbtHookTestSuite g_dbLbtHookTestSuite;
++
++} // namespace ns3
+diff --git a/src/wifi/wscript b/src/wifi/wscript
+index a7a4fd88319cc13af0bba1aa89ba65957fb37245..99bebcfb1c7bdb7cb8cc8d2da16d8eaa512ee96a 100644
+--- a/src/wifi/wscript
++++ b/src/wifi/wscript
+@@ -156,6 +156,7 @@ def build(bld):
+         'test/wifi-mac-ofdma-test.cc',
+         'test/wifi-phy-ofdma-test.cc',
+         'test/wifi-mac-queue-test.cc',
++        'test/dblbt-hook-test.cc',
+         ]
+ 
+     # Tests encapsulating example programs should be listed here
+@@ -315,4 +316,3 @@ def build(bld):
+         bld.recurse('examples')
+ 
+     bld.ns3_python_bindings()
+-

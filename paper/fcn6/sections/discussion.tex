@@ -1,0 +1,59 @@
+\section{Discussion}
+\label{sec:discussion}
+
+\subsection{Why a Linear Contextual Model Is Enough}
+
+The learner does not predict a waveform or an instantaneous channel gain.
+Native CCA and ACK/HARQ processing have already converted those quantities into
+busy periods, interruptions, successes, and delays. For the controller, the
+relevant surface is the reward difference among 24 legal recovery profiles.
+An 11-dimensional linear model is a useful first approximation to that small
+surface, and LinUCB adds directed exploration when online samples are limited.
+The UCB ablation supports the value of context; the unresolved feature
+ablations do not motivate a larger nonlinear model.
+
+The scenario differences also fit the protocol interpretation. Under light
+Poisson traffic, queues repeatedly enter and leave contention, so activation
+and recent service history can distinguish useful profiles. Heavy Poisson
+traffic behaves more like a persistently active set, where fixed TMC is already
+strong and exploration can cost utility. The combined case mixes arrivals,
+periodic occupancy, and active-set turnover; there, contextual LinUCB separates
+from UCB even though no single feature-group removal is decisive. These
+patterns explain the aggregate gain without suggesting that adaptation should
+improve every load.
+
+\subsection{Distributed-Learner Interpretation}
+
+When several nodes adapt, node $k$ receives reward
+$R_k(\boldsymbol q_t)$ under the joint arm vector
+$\boldsymbol q_t=(q_{1,t},\ldots,q_{|\mathcal K|,t})$. This interaction may be
+read as a restricted stochastic contextual bandit game. The reading is valid
+when peer actions are non-anticipating within the current decision interval,
+their joint policy changes little over $T_{\rm adapt}$, and updates are
+asynchronous or weakly coupled. Peers may learn under those conditions because
+their aggregate behavior changes slowly enough over a local update
+window. Rapid synchronized co-adaptation, action-conditioned retaliation, or
+jamming breaks that approximation. The interpretation supplies neither a Nash
+convergence result nor an adversarial-regret guarantee.
+
+\subsection{Limitations and Future Work}
+
+The operating region lies between two unhelpful extremes. A fixed occupancy
+process needs no adaptation; a process that changes faster than context can be
+collected makes history stale. Equation~\eqref{eq:timescale} instead assumes
+locally distinguishable phases with enough dwell time for learning. Separate
+Poisson-rate runs establish load dependence, while the event
+\texttt{dynamic-combined-4x4} case is a faster stress test: nodes join every
+10 global rounds, stay active for 200 rounds, and decisions occur every 32 rounds.
+Neither experiment directly estimates $T_{\rm adapt}$.
+
+Physical validation is also incomplete. The ns-3 runs use fixed positions,
+disabled log-normal shadowing, one static frequency-selective channel draw, and
+only three two-second seeds. A stronger study should separate propagation and
+decoding measurements (SINR, PER/BLER, MCS, coherence time) from sensing
+measurements (energy-detection margin and miss/false-busy rates). MAC service
+needs simultaneous-access collisions, airtime, retransmissions, and delay
+tails; learning dynamics needs recovery time and performance versus
+$T_{\rm adapt}/T_{\rm dwell}$. These four measurement classes would show whether a
+sliding-window learner, change-point reset, or nonlinear reward model is
+actually warranted.
