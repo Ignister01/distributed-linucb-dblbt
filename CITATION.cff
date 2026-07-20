@@ -5,6 +5,12 @@ type: software
 authors:
   - family-names: Wang
     given-names: Yikai
+    affiliation: Tongji University
+    email: 2454280@tongji.edu.cn
+  - family-names: Liu
+    given-names: Yinuo
+    affiliation: Shanghai Customs University
+    email: liuyinuo@shcc.edu.cn
 repository-code: "https://github.com/Ignister01/distributed-linucb-dblbt"
 url: "https://github.com/Ignister01/distributed-linucb-dblbt"
 license: MIT

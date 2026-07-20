@@ -1,7 +1,7 @@
 # Distributed LinUCB-Based Adaptive DB-LBT
 
 Reproducibility artifact for *Distributed LinUCB-Based Adaptive DB-LBT with
-Local Observations for Wi-Fi/NR-U Coexistence* by Yikai Wang.
+Local Observations for Wi-Fi/NR-U Coexistence* by Yikai Wang and Yinuo Liu.
 
 The repository contains the event simulator, distributed LinUCB controller,
 experiment matrices, pinned Python environment, ns-3/5G-LENA/NR-U integration
@@ -74,4 +74,4 @@ but the effect is scenario dependent; the seed-level values are available in
 
 Citation metadata is provided in [CITATION.cff](CITATION.cff). Software is
 released under the MIT License. Experimental data and figures are released
-under CC BY 4.0; the manuscript remains copyright Yikai Wang.
+under CC BY 4.0; the manuscript remains copyright its authors.
