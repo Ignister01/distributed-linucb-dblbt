@@ -655,8 +655,8 @@ def test_task12_commands_fail_closed(command: str, arguments: list[str]) -> None
 def test_task12_model_option_is_optional_for_smoke_mode() -> None:
     cli = import_module("dblbt_fcn.cli")
 
-    plot = CliRunner().invoke(cli.app, ["plot", "--help"])
-    audit = CliRunner().invoke(cli.app, ["audit", "--help"])
+    plot = CliRunner().invoke(cli.app, ["plot", "--help"], terminal_width=120)
+    audit = CliRunner().invoke(cli.app, ["audit", "--help"], terminal_width=120)
 
     assert plot.exit_code == 0
     assert audit.exit_code == 0
