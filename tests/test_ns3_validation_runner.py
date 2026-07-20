@@ -266,6 +266,10 @@ def test_runner_enforces_paths_workers_and_toolchain() -> None:
     assert "--build-profile=optimized" in text
 
 
+@pytest.mark.skipif(
+    not Path("/mnt/d").exists(),
+    reason="WSL drvfs check requires /mnt/d",
+)
 def test_runner_requires_ext4_cache_and_runtime_paths() -> None:
     ext4_cache = "/root/.cache/dblbt-fcn"
     ext4_runtime = "/root/.cache/dblbt-fcn/runtime"

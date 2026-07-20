@@ -696,6 +696,10 @@ def test_concurrent_same_job_sidecar_is_byte_stable(tmp_path: Path) -> None:
     assert list(config.parent.glob("*.partial")) == []
 
 
+@pytest.mark.skipif(
+    not Path("/mnt/d").exists(),
+    reason="portable Windows/WSL path test requires /mnt/d",
+)
 def test_run_job_returns_portable_completed_manifest_without_foreign_access(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
