@@ -3,6 +3,7 @@
 from importlib import import_module
 import json
 from pathlib import Path
+import re
 
 import pytest
 from typer.testing import CliRunner
@@ -21,6 +22,8 @@ COMMANDS = {
     "audit",
     "cross-validate",
 }
+
+_ANSI_SGR = re.compile(r"\x1b\[[0-9;]*m")
 
 
 def _job_payload(*, matrix: str = "smoke", policy: str = "random_lbt") -> dict[str, object]:
@@ -661,8 +664,12 @@ def test_task12_model_option_is_optional_for_smoke_mode() -> None:
     assert plot.exit_code == 0
     assert audit.exit_code == 0
     assert "required" not in next(
-        line for line in plot.output.splitlines() if "--model" in line
+        line
+        for line in _ANSI_SGR.sub("", plot.output).splitlines()
+        if "--model" in line
     ).lower()
     assert "required" not in next(
-        line for line in audit.output.splitlines() if "--model" in line
+        line
+        for line in _ANSI_SGR.sub("", audit.output).splitlines()
+        if "--model" in line
     ).lower()
