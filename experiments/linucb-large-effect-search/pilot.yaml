@@ -1,0 +1,424 @@
+version: 1
+name: linucb-large-effect-pilot
+rounds: 20000
+alpha: 11
+timing:
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+seeds: [5101, 5107, 5113]
+policies: [tmc_db_lbt, adaptive_db_lbt]
+conditions: []
+arm_ids: []
+scenarios:
+  - id: load-n03-p015
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.015
+  - id: load-n03-p025
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+  - id: load-n03-p035
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+  - id: load-n03-p045
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.045
+  - id: load-n04-p015
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.015
+  - id: load-n04-p025
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+  - id: load-n04-p035
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+  - id: load-n04-p045
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.045
+  - id: load-n05-p015
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.015
+  - id: load-n05-p025
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+  - id: load-n05-p035
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+  - id: load-n05-p045
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.045
+  - id: load-n06-p015
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.015
+  - id: load-n06-p025
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+  - id: load-n06-p035
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+  - id: load-n06-p045
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.045
+
+  - id: turnover-n03-p020-j10-l200
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.020
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n03-p025-j10-l200
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n03-p030-j10-l200
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n03-p035-j10-l200
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n04-p020-j10-l200
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.020
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n04-p025-j10-l200
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n04-p030-j10-l200
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n04-p035-j10-l200
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n05-p020-j10-l200
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.020
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n05-p025-j10-l200
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n05-p030-j10-l200
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n05-p035-j10-l200
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n06-p020-j10-l200
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.020
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n06-p025-j10-l200
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n06-p030-j10-l200
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n06-p035-j10-l200
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n04-p025-j05-l100
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    join_interval_rounds: 5
+    lifetime_rounds: 100
+  - id: turnover-n04-p025-j20-l400
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    join_interval_rounds: 20
+    lifetime_rounds: 400
+  - id: turnover-n04-p035-j05-l100
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 5
+    lifetime_rounds: 100
+  - id: turnover-n04-p035-j20-l400
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 20
+    lifetime_rounds: 400
+  - id: turnover-n05-p025-j05-l100
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    join_interval_rounds: 5
+    lifetime_rounds: 100
+  - id: turnover-n05-p025-j20-l400
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    join_interval_rounds: 20
+    lifetime_rounds: 400
+  - id: turnover-n05-p035-j05-l100
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 5
+    lifetime_rounds: 100
+  - id: turnover-n05-p035-j20-l400
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 20
+    lifetime_rounds: 400
+
+  - id: combined-n03-p020
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.020
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n03-p025
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n03-p030
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n03-p035
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n04-p020
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.020
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n04-p025
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n04-p030
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n04-p035
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n05-p020
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.020
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n05-p025
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n05-p030
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n05-p035
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n06-p020
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.020
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n06-p025
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n06-p030
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-n06-p035
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200

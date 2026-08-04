@@ -1,0 +1,56 @@
+version: 1
+name: comments0720-adaptive-confirmation
+rounds: 100000
+alpha: 11
+timing:
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+seeds:
+  - 10103
+  - 10111
+  - 10133
+  - 10139
+  - 10141
+  - 10151
+  - 10159
+  - 10163
+  - 10169
+  - 10177
+  - 10181
+  - 10193
+  - 10211
+  - 10223
+  - 10243
+  - 10247
+  - 10253
+  - 10259
+  - 10267
+  - 10271
+  - 10273
+  - 10289
+  - 10301
+  - 10303
+  - 10313
+  - 10321
+  - 10331
+  - 10333
+  - 10337
+  - 10343
+  - 10357
+  - 10369
+policies: [tmc_db_lbt, adaptive_db_lbt]
+conditions: []
+arm_ids: []
+scenarios:
+  - id: poisson-n04-p025
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+  - id: poisson-n06-p045
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.045

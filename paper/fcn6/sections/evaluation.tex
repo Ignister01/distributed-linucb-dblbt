@@ -1,124 +1,130 @@
 \section{Evaluation}
 \label{sec:evaluation}
 
-The evaluation reuses the completed paired-seed data. The event simulator
-implements \eqref{eq:reduction} for \num{100000} contention rounds, with
-\SI{2}{\milli\second} transmissions, equal Wi-Fi/NR-U contention windows
-$[15,63]$, and a \SI{250}{\micro\second} NR-U synchronization grid. Ten formal
-seeds are disjoint from the three pretraining seeds. Pairing fixes exogenous
-random streams across policies. Held-out conditions cover unseen symmetric and
-asymmetric densities, two Poisson rates, two periodic occupancies, sensing
-perturbation, and a combined dynamic case. A separate
-ns-3.35/5G-LENA/NR-U model provides the packet-level cross-check.
+\subsection{Paired Phase Experiment}
 
-The reporting utility is distinct from the local reward in
+The event simulator implements the contention reduction in
+\eqref{eq:reduction}. A transmission occupies \SI{2}{\milli\second}; Wi-Fi and
+NR-U use equal contention windows $[15,63]$, and NR-U access is aligned to a
+\SI{250}{\micro\second} grid. Exogenous arrival and contention streams are
+paired between Adaptive DB-LBT and fixed TMC. The 32 formal seeds, ranging
+from 20029 to 20341, were frozen before the pilot and do not overlap the three
+discovery seeds.
+
+Each 32,768-round run alternates two 4096-round phases four times. The light
+phase activates four Wi-Fi and four NR-U nodes with Poisson rate 0.025
+packets/ms per node. The high phase activates all six nodes of each technology
+at rate 0.045. Thus each seed contains seven observed transitions and equal
+dwell time in both regimes.
+
+\begin{table}[!t]
+\caption{Formal Confirmation Design}
+\label{tab:formal-design}
+\centering
+\footnotesize
+\begin{tabularx}{\columnwidth}{@{}p{25mm}Y@{}}
+\toprule
+Item & Frozen value \\
+\midrule
+Compared policies & Distributed LinUCB over $q_4/q_{20}$; fixed $q_{20}$ TMC \\
+Formal evidence & 32 paired seeds; discovery seeds excluded \\
+Light phase & $4+4$, Poisson 0.025 packets/ms/node \\
+High phase & $6+6$, Poisson 0.045 packets/ms/node \\
+Schedule & Eight 4096-round phases; 32,768 rounds/run \\
+Inference & Seed-paired bootstrap, 10,000 resamples \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The reporting utility is separate from the local reward in
 \eqref{eq:reward}:
 \begin{align}
-U_D^{\rm eval}&=1-\operatorname{clip}
- (D_{95}/500\,\mathrm{ms},0,1),\\
+U_D^{\rm eval}&=1-\operatorname{clip}(D_{95}/500\,\mathrm{ms},0,1),\nonumber\\
 U_{\rm eval}&=(A_{\rm total}+U_D^{\rm eval}+J)/3-0.25P_{\rm col}.
 \label{eq:evaluation-utility}
 \end{align}
 It combines effective data airtime, P95 access delay, Jain fairness, and event
-collision probability. Full scenario matrices, seeds, and component metrics
-appear in the appendix.
+collision probability. We first recompute all four components within every
+contiguous phase, average the eight phase utilities within a seed, and form
+paired bootstrap intervals across seeds. This phase-conditional estimand keeps
+the active population fixed inside each metric calculation.
 
-The experiments follow the control argument in order. Mechanism validation
-checks that online selection does not erase deterministic spacing in a stable
-cell. Held-out event scenarios then ask whether the pretrained controller
-transfers to unseen density, asymmetry, traffic, and occupancy conditions. The
-packet model replaces the ideal contention rule with EDCA, HARQ, PHY
-interference, and NR-U alignment. Finally, ablations compare contextual and
-context-free selection and remove feature groups from the same dynamic case.
-This sequence keeps a scheduling result, a generalization result, and a
-packet-level result from being treated as interchangeable evidence.
+\begin{figure*}[!t]
+  \centering
+  \includegraphics[width=.96\textwidth]{restricted-confirmation.pdf}
+  \caption{Independent 32-seed confirmation. Left: Adaptive-minus-TMC utility;
+  intervals are paired 95\% bootstrap CIs. ``Phase avg.'' is the primary
+  within-phase estimator, while ``Mixed-set diag.'' computes one utility over
+  the entire run. Right: online choices are restricted to the two profiles in
+  Table~\ref{tab:profiles}.}
+  \label{fig:restricted}
+\end{figure*}
 
-\subsection{Mechanism Validation}
+\subsection{Performance and Decisions}
+
+Figure~\ref{fig:restricted} shows a strong regime split. In the light $4+4$
+phase, Adaptive DB-LBT improves utility by $0.015735$ (95\% CI
+$[0.015322,0.016145]$), and all 32 seed differences are positive. In the high
+$6+6$ phase the effect is $-0.001058$
+($[-0.001283,-0.000843]$); only one seed is positive. Averaging equal-duration
+phases gives $+0.007338$ ($[0.007093,0.007584]$), positive for every seed.
+
+The component differences explain that result. Relative to TMC, the
+phase-averaged collision probability falls by 0.032288 and Jain fairness rises
+by 0.000245. Effective airtime falls by 0.002059, while P95 delay increases by
+\SI{193.3}{\micro\second}. The utility gain is therefore a collision reduction
+that outweighs small airtime and delay costs; it is not a uniform improvement
+of every metric.
+
+Arm choices follow the offline conflict. Nodes choose $q_4$ for 98.9\% of
+light-phase decisions. In the high phase, the fixed-TMC profile $q_{20}$ rises
+to 76.9\%. Residual exploration of $q_4$ is consistent with the small high-load
+penalty. This behavior also gives a protocol interpretation to the light-load
+gain: queues repeatedly enter contention, and the shorter recovery cycle with
+$m=10$ is favored; persistent high load returns most decisions to TMC.
+
+We measure adaptation from the local reward trace after every explicit phase
+change. Recovery is the first of three consecutive eight-decision windows that
+reaches 90\% of the improvement from the immediate post-change level to the
+last-quarter phase level. All 224 transitions recover without censoring.
+Median $T_{\rm adapt}$ is 736 rounds and the 95th percentile is 928 rounds,
+well below $T_{\rm dwell}=4096$. The experiment therefore checks, rather than
+only assumes, the critical ordering in \eqref{eq:timescale} for this scenario.
+
+\subsection{Aggregation Sensitivity and Packet Check}
+
+A whole-run calculation pools phases before forming the nonlinear utility.
+It gives $-0.000668$ ($[-0.000921,-0.000413]$), with 6/32 positive seeds.
+The direction changes because the active population, delay distribution, and
+fairness denominator are mixed before normalization; the corresponding
+airtime, P95-delay, and fairness differences become $-0.013570$,
+$+\SI{2.240}{\milli\second}$, and $-0.008170$. We retain this diagnostic because
+an application that values one end-to-end mixed-population score should not
+substitute the phase-conditional conclusion.
+
+The repository also contains an ns-3.35/5G-LENA/NR-U protocol cross-check with
+Wi-Fi EDCA, NR-U alignment, HARQ, and a frequency-selective channel. That older
+three-seed campaign used the initial unrestricted 24-profile model, so its
+mixed technology-level directions are not treated as confirmation of the
+restricted controller.
 
 \begin{table}[!t]
-\caption{Mechanism Validation over Ten Event Seeds}
-\label{tab:mechanism}
+\caption{Five-Second ns-3 Shadowing Diagnostic (TMC, Seed 410)}
+\label{tab:ns3-diagnostic}
 \centering
-\footnotesize
-\begin{tabular}{@{}llrrr@{}}
+\scriptsize
+\begin{tabular}{@{}lrrrr@{}}
 \toprule
-Scenario & Policy & $U_{\rm eval}$ & $P_{\rm col}$ & $D_{95}$ (ms) \\
+Tech. & Thr. (Mb/s) & Delay (ms) & IP loss & Access overlap \\
 \midrule
-Static $4+4$ & Random & 0.805443 & 0.229707 & 77.881 \\
-             & Fixed TMC & 0.979499 & 0.000139 & 14.018 \\
-             & Adaptive & 0.979499 & 0.000139 & 14.018 \\
-Load-change $4+4$ & Random & 0.814530 & 0.174006 & 93.110 \\
-             & Fixed TMC & 0.961087 & 0.017734 & 14.018 \\
-             & Adaptive & 0.961785 & 0.016664 & 14.018 \\
+Wi-Fi & 8.121 & 1.793 & 0.0117 & 0.3093 \\
+NR-U  & 7.537 & 38.087 & 0.0828 & 0.7726 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-Table~\ref{tab:mechanism} first asks whether adding a learner disturbs the
-underlying schedule. In static $4+4$, deterministic spacing removes almost all
-event collisions and the random-backoff delay tail. Adaptive and fixed TMC
-DB-LBT are numerically identical. After a load change, the adaptive controller
-retains the mechanism and improves utility from $0.961087$ to $0.961785$.
-
-\subsection{Generalization beyond Training Conditions}
-
-\begin{figure*}[!t]
-  \centering
-  \subfloat[Mean utility across held-out scenarios.]{%
-    \includegraphics[width=.47\textwidth]{results-heldout.pdf}}
-  \hfill
-  \subfloat[Paired adaptive-minus-fixed-TMC differences.]{%
-    \includegraphics[width=.51\textwidth]{results-differences.pdf}}
-  \caption{Held-out event evaluation over ten paired seeds. In (a), the axis is
-  truncated and values are printed beside the bars. In (b), differences are
-  scaled by $10^3$; bars are 95\% paired-bootstrap intervals. Green favors
-  adaptive DB-LBT, red favors fixed TMC, and gray crosses zero.}
-  \label{fig:generalization}
-\end{figure*}
-
-Figure~\ref{fig:generalization}(a) aggregates ten unseen topology, load, and
-occupancy scenarios. Adaptive DB-LBT reaches $0.928023$, compared with
-$0.926467$ for fixed TMC and $0.928067$ for the training-seed fixed oracle.
-The paired gain is $0.001556$, with 95\% interval
-$[0.001470,0.001651]$. Stable utility changes by only
-$-7.0\times10^{-7}$, and Jain fairness stays within the registered
-$-0.01$ tolerance.
-
-Each confidence interval is formed from ten within-seed policy differences,
-not from pooled rounds. The exogenous seed controls arrivals, occupancy, and
-other scenario randomness shared by the compared policies. The fixed oracle is
-chosen only from training seeds and is included as a reference for a single
-non-adaptive tuple, not as an online upper bound.
-
-The aggregate hides useful variation. Light Poisson traffic and the combined
-dynamic case improve, heavy Poisson traffic slightly degrades, and several
-periodic or sensing-perturbation cases tie at retained precision
-[Fig.~\ref{fig:generalization}(b)]. Across the registered non-ideal set, the
-gain is $0.289\%$, below the 10\% engineering target. The adaptive controller
-is therefore most useful where local load and active-set information changes
-the preferred recovery profile.
-
-\subsection{Packet-Level Cross-Check}
-
-The ns-3 model retains Wi-Fi ACK/EDCA behavior, NR-U HARQ and boundary
-alignment, a 3GPP indoor frequency-selective channel, and a periodic waveform
-interferer. Node positions and the sampled channel matrix are fixed. The
-load-change case switches offered load halfway through its two-second run,
-making it the closest packet-level realization of the intended phase change.
-
-Across three paired seeds, adaptive-minus-fixed changes mix favorable and
-unfavorable Wi-Fi/NR-U throughput and delay components. The event direction is
-tied in the static and periodic cases; for the load change it is favorable,
-whereas the packet-level majority is unfavorable. The stored ns-3 field named
-\texttt{collision\_probability} is reported as packet-loss ratio because it is
-computed from transmitted minus received IP packets and can include decoding
-failure. The appendix gives every technology-level difference.
-
-\subsection{What the Context Adds}
-
-The combined dynamic event case isolates the controller choices. Replacing
-LinUCB with context-free UCB lowers utility by $0.000686$, with 95\% interval
-$[-0.001259,-0.000138]$. This is the clearest evidence that the local feature
-vector matters. Removing queue, delay, or CCA/interruption features one group
-at a time yields intervals that cross zero, as does freezing online updates.
-The complete ablation forest is retained in the appendix.
+Table~\ref{tab:ns3-diagnostic} is a measurement-path diagnostic with 3GPP
+shadowing enabled, not an adaptive-policy comparison. The access quantity is
+the fraction of transmission starts overlapping another active transmission;
+IP loss is computed from transmitted and received packets. Their different
+values confirm that decoding loss and simultaneous access must remain separate.

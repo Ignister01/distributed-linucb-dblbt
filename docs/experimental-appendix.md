@@ -5,6 +5,22 @@ with Local Observations for Wi-Fi/NR-U Coexistence*. It records the complete
 experimental configuration, seed policy, extended results, and artifact map
 without consuming pages in the six-page conference manuscript.
 
+## Primary Revision: Restricted-Profile Confirmation
+
+The six-page manuscript now treats the protocol-gated experiment in
+[experiments/comments0720/README.md](../experiments/comments0720/README.md) as
+primary. Discovery screens 24 legal DB-LBT profiles; online distributed LinUCB
+then chooses only q4=(5,2,10,15) and q20=(7,3,6,15) from local MAC
+observations. Across 32 untouched seeds and eight alternating 4,096-round
+phases, the phase-averaged Adaptive-minus-TMC utility is +0.007338
+(95% CI [+0.007093,+0.007584]; 32/32 positive). The low and high phase
+effects are +0.015735 and -0.001058; the whole-run mixed-active-set
+diagnostic is -0.000668. Median and P95 adaptation times are 736 and 928
+rounds.
+
+The older broad-matrix tables below are retained for auditability and should
+be read as historical evidence, not as the primary claim in the manuscript.
+
 ## 1. Experiment Inventory and Seeds
 
 Each event run contains 100,000 contention rounds. Pretraining uses seeds
@@ -143,3 +159,13 @@ All 27 packet-level SQLite databases are retained. The approximately 6.87 GiB
 event round records are regenerated from committed matrices and seeds with
 `scripts/run_overnight.sh`; the canonical 940-row seed-level result table is
 retained in Git.
+
+## 9. Shadowing-Enabled ns-3 Diagnostic
+
+A separate five-second diagnostic uses TMC, 4+4 nodes, seed 410, the
+comments0720-v2 runtime, and 3GPP shadowing enabled. It checks the measurement
+path rather than comparing adaptive and fixed policies. Wi-Fi records 8.1212
+Mbit/s throughput, 1.793 ms mean delay, 0.0117 packet loss, and 0.3093 access
+overlap. NR-U records 7.537 Mbit/s, 38.087 ms, 0.0828, and 0.7726, respectively.
+The compact files are [metrics.csv](../experiments/comments0720/results/ns3-shadowing-benchmark/metrics.csv)
+and [audit.json](../experiments/comments0720/results/ns3-shadowing-benchmark/audit.json).

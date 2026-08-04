@@ -1,0 +1,66 @@
+version: 1
+name: linucb-large-effect-confirmation
+rounds: 100000
+alpha: 11
+timing:
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+seeds:
+- 6101
+- 6113
+- 6121
+- 6131
+- 6133
+- 6143
+- 6151
+- 6163
+- 6173
+- 6197
+policies:
+- primary_db_lbt
+- tmc_db_lbt
+- adaptive_db_lbt
+conditions: []
+arm_ids: []
+scenarios:
+- id: combined-n06-p030
+  wifi_nodes: 6
+  nru_nodes: 6
+  legacy_ap_nodes: 0
+  legacy_sta_nodes: 0
+  traffic: poisson
+  poisson_rate_packets_ms: 0.03
+  interference_interval_ms: 30
+  interference_duration_us: 2000
+  interruption_std: 0.4
+  join_interval_rounds: 10
+  lifetime_rounds: 200
+  trace: false
+- id: load-n06-p015
+  wifi_nodes: 6
+  nru_nodes: 6
+  legacy_ap_nodes: 0
+  legacy_sta_nodes: 0
+  traffic: poisson
+  poisson_rate_packets_ms: 0.015
+  interference_interval_ms: null
+  interference_duration_us: null
+  interruption_std: 0.0
+  join_interval_rounds: null
+  lifetime_rounds: null
+  trace: false
+- id: turnover-n06-p030-j10-l200
+  wifi_nodes: 6
+  nru_nodes: 6
+  legacy_ap_nodes: 0
+  legacy_sta_nodes: 0
+  traffic: poisson
+  poisson_rate_packets_ms: 0.03
+  interference_interval_ms: null
+  interference_duration_us: null
+  interruption_std: 0.0
+  join_interval_rounds: 10
+  lifetime_rounds: 200
+  trace: false

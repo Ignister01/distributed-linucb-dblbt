@@ -1,0 +1,24 @@
+version: 1
+name: linucb-large-effect-fixed-confirmation-combined
+rounds: 100000
+alpha: 11
+timing:
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+seeds: [8101, 8111, 8117, 8123, 8147, 8161, 8171, 8179, 8191, 8209]
+policies: [pretrain_arm]
+conditions: []
+arm_ids: [4]
+scenarios:
+  - id: combined-n06-p030
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200

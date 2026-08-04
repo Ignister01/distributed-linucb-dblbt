@@ -43,7 +43,8 @@ Ns3Policy = Literal["random", "tmc", "adaptive"]
 Ns3MetricName = Literal[
     "throughput_mbps",
     "mean_delay_us",
-    "collision_probability",
+    "packet_loss_ratio",
+    "simultaneous_access_collision_rate",
     "channel_occupancy",
 ]
 Ns3Scenario = Literal[
@@ -127,6 +128,7 @@ class Ns3ValidationJob:
     dynamic_load_change: bool
     interference_interval_ms: int | None
     interference_duration_ms: int | None
+    shadowing_enabled: bool
     node_rate_bps: int = 2_000_000
     traffic_mode: str = "aggregate-saturated-cbr"
     alpha: int = 11
@@ -217,6 +219,7 @@ def validation_jobs() -> tuple[Ns3ValidationJob, ...]:
                         dynamic_load_change=scenario == "dynamic-4x4",
                         interference_interval_ms=300 if nonideal else None,
                         interference_duration_ms=2 if nonideal else None,
+                        shadowing_enabled=True,
                     )
                 )
     return tuple(jobs)
@@ -239,6 +242,7 @@ def _job_for_artifact(job_id: str) -> Ns3ValidationJob:
             dynamic_load_change=False,
             interference_interval_ms=None,
             interference_duration_ms=None,
+            shadowing_enabled=False,
         )
     raise ValueError(f"unknown ns-3 validation job: {job_id}")
 
@@ -473,14 +477,15 @@ def _validate_ns3_database(
         metadata = connection.execute(
             "SELECT schema_version, job_id, policy, scenario, seed, "
             "run_id, wifi_aps, nru_gnbs, node_rate_bps, traffic_mode, "
-            "srs_enabled, alpha, cold_start_attempts, "
+            "sim_time_s, shadowing_enabled, srs_enabled, alpha, "
+            "cold_start_attempts, "
             "decision_interval, context_dim, num_arms, model_sha256, "
             "model_export_sha256, action_grid_hash, ns3_commit, "
             "nr_commit, nru_commit, patch_sha256, scenario_sha256 "
             "FROM validation_metadata"
         ).fetchall()
         expected_metadata = (
-            1,
+            2,
             job.job_id,
             job.policy,
             job.scenario,
@@ -490,6 +495,8 @@ def _validate_ns3_database(
             job.nru_gnbs,
             job.node_rate_bps,
             job.traffic_mode,
+            job.sim_time_s,
+            int(job.shadowing_enabled),
             0,
             job.alpha,
             job.cold_start_attempts,
@@ -601,21 +608,36 @@ def _validate_ns3_database(
             )
         metrics = connection.execute(
             "SELECT technology, throughput_mbps, mean_delay_us, "
-            "collision_probability, channel_occupancy "
+            "packet_loss_ratio, simultaneous_access_collision_rate, "
+            "channel_occupancy "
             "FROM validation_metrics ORDER BY technology"
         ).fetchall()
         if len(metrics) != 2 or {row[0] for row in metrics} != {"wifi", "nru"}:
             raise ValueError(
                 f"ns-3 database lacks paired technology metrics for {job.job_id}"
             )
-        for _, throughput, delay, collisions, occupancy in metrics:
+        for (
+            _,
+            throughput,
+            delay,
+            packet_loss,
+            access_collisions,
+            occupancy,
+        ) in metrics:
             if any(
                 not _finite_number(value)
-                for value in (throughput, delay, collisions, occupancy)
+                for value in (
+                    throughput,
+                    delay,
+                    packet_loss,
+                    access_collisions,
+                    occupancy,
+                )
             ) or not (
                 throughput >= 0
                 and delay >= 0
-                and 0 <= collisions <= 1
+                and 0 <= packet_loss <= 1
+                and 0 <= access_collisions <= 1
                 and 0 <= occupancy <= 1
             ):
                 raise ValueError("ns-3 databases require finite numeric metrics")
@@ -671,7 +693,7 @@ def audit_ns3_validation(
             ) from error
         database_hash = _sha256(database)
         expected_manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "status": "complete",
             "exit_code": 0,
             "job_id": job.job_id,
@@ -685,6 +707,8 @@ def audit_ns3_validation(
             "scenario_sha256": scenario_hash,
             "node_rate_bps": job.node_rate_bps,
             "traffic_mode": job.traffic_mode,
+            "sim_time_s": job.sim_time_s,
+            "shadowing_enabled": job.shadowing_enabled,
             "srs_enabled": False,
             "build_profile": expected_build_profile,
         }
@@ -715,7 +739,8 @@ def audit_ns3_validation(
 _NS3_METRICS: tuple[Ns3MetricName, ...] = (
     "throughput_mbps",
     "mean_delay_us",
-    "collision_probability",
+    "packet_loss_ratio",
+    "simultaneous_access_collision_rate",
     "channel_occupancy",
 )
 
@@ -738,7 +763,7 @@ def reduce_ns3_validation(
     )
     database_root = _path(root).resolve(strict=True) / "databases"
     values: dict[
-        tuple[str, int, Ns3Policy, str], tuple[float, float, float, float]
+        tuple[str, int, Ns3Policy, str], tuple[float, ...]
     ] = {}
     for job in validation_jobs():
         if job.policy == "random":
@@ -748,7 +773,8 @@ def reduce_ns3_validation(
         with sqlite3.connect(uri, uri=True) as connection:
             rows = connection.execute(
                 "SELECT technology, throughput_mbps, mean_delay_us, "
-                "collision_probability, channel_occupancy "
+                "packet_loss_ratio, simultaneous_access_collision_rate, "
+                "channel_occupancy "
                 "FROM validation_metrics ORDER BY technology"
             ).fetchall()
         for technology, *raw_metrics in rows:
@@ -915,7 +941,7 @@ def write_ns3_reduction(
     metadata_payload = (
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "audited": report.audited,
                 "model_sha256": report.model_sha256,
                 "model_export_sha256": report.model_export_sha256,

@@ -50,6 +50,7 @@ def _ns3_rows(
     directions: dict[str, str],
     *,
     occupancy_difference: float = 0.0,
+    packet_loss_difference: float = 0.0,
 ) -> list[dict[str, object]]:
     rows: list[dict[str, object]] = []
     for scenario in SCENARIOS:
@@ -63,13 +64,19 @@ def _ns3_rows(
             for metric in (
                 "throughput_mbps",
                 "mean_delay_us",
-                "collision_probability",
+                "packet_loss_ratio",
+                "simultaneous_access_collision_rate",
                 "channel_occupancy",
             ):
                 if metric == "throughput_mbps":
                     difference = sign
-                elif metric in ("mean_delay_us", "collision_probability"):
+                elif metric in (
+                    "mean_delay_us",
+                    "simultaneous_access_collision_rate",
+                ):
                     difference = -sign
+                elif metric == "packet_loss_ratio":
+                    difference = packet_loss_difference
                 else:
                     difference = occupancy_difference
                 rows.append(
@@ -149,6 +156,28 @@ def test_channel_occupancy_is_reported_but_does_not_set_h5_direction() -> None:
         _ns3_rows(
             {scenario: "improvement" for scenario in SCENARIOS},
             occupancy_difference=-1_000_000.0,
+        ),
+    )
+
+    assert changed.agreements == baseline.agreements
+    assert changed.h5_status == baseline.h5_status
+    assert (
+        changed.scenarios[0].ns3_metric_differences
+        != baseline.scenarios[0].ns3_metric_differences
+    )
+
+
+def test_packet_loss_is_reported_but_does_not_substitute_for_access_collision() -> None:
+    event = _event_rows({scenario: "improvement" for scenario in SCENARIOS})
+    baseline = cross_model_consistency(
+        event,
+        _ns3_rows({scenario: "improvement" for scenario in SCENARIOS}),
+    )
+    changed = cross_model_consistency(
+        event,
+        _ns3_rows(
+            {scenario: "improvement" for scenario in SCENARIOS},
+            packet_loss_difference=1_000_000.0,
         ),
     )
 
@@ -252,7 +281,7 @@ def test_ns3_scenario_metrics_are_bound_to_reduction_hash(tmp_path: Path) -> Non
         json.dumps(
             {
                 "audited": 27,
-                "scenario_rows": 24,
+                "scenario_rows": 30,
                 "scenario_metrics_sha256": hashlib.sha256(
                     metrics.read_bytes()
                 ).hexdigest(),
@@ -264,7 +293,7 @@ def test_ns3_scenario_metrics_are_bound_to_reduction_hash(tmp_path: Path) -> Non
         encoding="ascii",
     )
 
-    assert len(load_ns3_scenario_metrics(metrics, reduction)) == 24
+    assert len(load_ns3_scenario_metrics(metrics, reduction)) == 30
     metrics.write_bytes(metrics.read_bytes() + b"\n")
     with pytest.raises(ValueError, match="hash"):
         load_ns3_scenario_metrics(metrics, reduction)

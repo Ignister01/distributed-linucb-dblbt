@@ -1,11 +1,10 @@
 \section{Protocol-Constrained Contextual Bandit}
 \label{sec:method}
 
-\subsection{Legal DB-LBT Actions}
+\subsection{Legal Profiles and Offline Screening}
 
-After queue activation, node $k$ draws
-$b_k\sim\mathcal U[0,b_{\mathrm{init}}]$. Once an attempt completes, DB-LBT
-sets the recovery counter
+When a queue becomes active, node $k$ draws
+$b_k\sim\mathcal U[0,b_{\rm init}]$. After an attempt, DB-LBT sets
 \begin{equation}
 b_k^{+}=
 \begin{cases}
@@ -14,117 +13,87 @@ b_k^{+}=
 \end{cases}
 \label{eq:dblbt}
 \end{equation}
-where $r_k$ is the retransmission count. The deterministic branch turns
-interruptions into schedule spacing; the short random branch separates
-coincident schedules. We retain $\alpha=11$ and expose only the four recovery
-parameters in Table~\ref{tab:mapping}.
+where $r_k$ is the retransmission count. The first branch converts observed
+interruptions into spacing; the second separates coincident schedules. We fix
+$\alpha=11$ and form 24 legal profiles from
+$\kappa\in\{5,7\}$, $\beta\in\{2,3\}$,
+$m\in\{4,6,10\}$, and $b_{\rm init}\in\{15,31\}$, always with
+$\beta<\kappa$. This grid contains the published TMC profile
+$(7,3,6,15)$.
+
+Deploying all 24 profiles would spend scarce online samples on actions that do
+not address the target regime change. Design-space screening is separated
+from control. Every profile is evaluated offline across 12
+topology, load, traffic, interference, and turnover cells using discovery
+seeds 9103, 9113, and 9127. A pair advances only if its ordering reverses
+between two phase-compatible cells, each paired-bootstrap lower bound is
+positive, and the associated Jain-fairness loss is at most 0.01.
+
+The selected cells are Poisson $4+4$ at 0.025 packets/ms and Poisson $6+6$ at
+0.045 packets/ms. Table~\ref{tab:profiles} gives their representative profiles;
+$q_{20}$ is fixed TMC.
 
 \begin{table}[!t]
-\caption{Contextual-Bandit Actions and Protocol Meaning}
-\label{tab:mapping}
+\caption{Profiles Allowed During Online Control}
+\label{tab:profiles}
 \centering
 \footnotesize
-\begin{tabularx}{\columnwidth}{@{}c p{15mm}Y@{}}
+\begin{tabular}{@{}lrrrrl@{}}
 \toprule
-Variable & Values & DB-LBT role \\
+Profile & $\kappa$ & $\beta$ & $m$ & $b_{\rm init}$ & Discovery role \\
 \midrule
-$\kappa$ & $5,7$ & Recovery-cycle length indexed by retransmissions. \\
-$\beta$ & $2,3$ & Early states using interruption-derived spacing. \\
-$m$ & $4,6,10$ & Maximum random backoff after repeated failure. \\
-$b_{\rm init}$ & $15,31$ & Initial range when a queue becomes active. \\
-\midrule
-$\alpha$ & fixed 11 & Common idle-space offset. \\
+$q_4$ & 5 & 2 & 10 & 15 & Light $4+4$ \\
+$q_{20}$ & 7 & 3 & 6 & 15 & High $6+6$; TMC \\
 \bottomrule
-\end{tabularx}
+\end{tabular}
 \end{table}
 
-The Cartesian product contains 24 arms and always satisfies
-$\beta<\kappa$. It is centered on the published TMC tuple
-$(7,3,6,15)$: $b_{\rm init}=15$ matches the common minimum contention
-window, 31 gives a more conservative activation range, and each $m$ is below
-$\alpha$. An action supplies only the next counter. CCA thresholds,
-AIFS/defer timing, NR-U priority class and MCOT, synchronization, MCS, and
-ACK/HARQ processing stay fixed by the technology and scenario.
+On the discovery seeds, $q_4$ exceeds $q_{20}$
+by 0.019250 utility in the light cell; $q_{20}$ exceeds $q_4$ by 0.000354 in
+the high cell. Online choices are restricted to
+$\mathcal Q_{\rm on}=\{q_4,q_{20}\}$. This protocol gate is part of the
+method: LinUCB cannot synthesize a backoff or choose an unvalidated tuple.
 
-Each parameter addresses a distinct recovery moment. The activation range
-$b_{\rm init}$ controls how aggressively a newly nonempty queue enters an
-existing schedule. Parameters $\kappa$ and $\beta$ determine how often early
-retransmission states return to interruption-derived spacing, while $m$
-controls the random escape after repeated failure. A larger value is not
-uniformly better: conservative activation can avoid a burst collision but
-adds delay when few nodes are active, and extra random recovery can separate
-colliding schedules while weakening deterministic reuse. This tradeoff is the
-reason to select complete tuples rather than tune one scalar.
+\subsection{Distributed LinUCB}
 
-\subsection{Local LinUCB Controller}
-
-Each node retains at most 64 of its own attempts. Its 11-dimensional context
-$x_k$ contains success/failure ratios, CCA busy fraction, countdown
-interruptions, delay EWMA and P95, queue occupancy, arrivals, retransmissions,
-effective-data occupancy, and
-$\hat n_k=\operatorname{clip}(1+\bar i_k,1,32)$. No peer identity, peer queue,
-global fairness value, or cross-technology message enters the vector.
-
-The action space is discrete, the context is low dimensional, and online
-samples are scarce. LinUCB fits this setting with one linear reward model per
-arm and an explicit exploration bonus. Within a locally separable regime, the
-working approximation is
-\begin{equation}
-\mathbb E[R_{k,t}\mid x_{k,t}=x,q_{k,t}=q,z]
-\simeq x^{\mathsf T}\theta_{k,q}^{(z)}.
-\label{eq:linear-reward}
-\end{equation}
-The model is linear in context within one arm; it is not linear in the four
-DB-LBT parameters. Keeping a separate $\theta_{k,q}^{(z)}$ for every tuple
-allows parameter interactions to differ across arms. It also avoids imposing a
-monotone ordering on $\kappa$, $\beta$, $m$, or $b_{\rm init}$. Thus the
-nonlinear CCA and decoding maps in \eqref{eq:cca}--\eqref{eq:success} remain
-outside the learner, while the locally observed reward surface is approximated
-where decisions are actually made.
-
-For each arm $q$, the controller maintains
-$A_q\in\mathbb R^{11\times11}$ and $d_q\in\mathbb R^{11}$:
+Each transmitter holds its own controller and 64-attempt history. For
+$q\in\mathcal Q_{\rm on}$, it maintains
+$A_q\in\mathbb R^{11\times11}$ and $d_q\in\mathbb R^{11}$. The local
+working model and selection rule are
 \begin{align}
-\hat\theta_q&=A_q^{-1}d_q,\\
+\mathbb E[R_{k,t}\mid x_{k,t}=x,q_{k,t}=q]&\simeq x^{\mathsf T}\theta_q,
+\label{eq:linear-reward}\\
+\hat\theta_q&=A_q^{-1}d_q,\nonumber\\
 p_q(x_k)&=\hat\theta_q^{\mathsf T}x_k+
-c\sqrt{x_k^{\mathsf T}A_q^{-1}x_k},\\
-q^*&=\arg\max_q p_q(x_k),
+c\sqrt{x_k^{\mathsf T}A_q^{-1}x_k},\nonumber\\
+q^*&=\arg\max_{q\in\mathcal Q_{\rm on}}p_q(x_k),
 \label{eq:linucb}
 \end{align}
-with $c=0.5$. After observing reward $R_k$, the selected model receives
-$A_q\leftarrow A_q+x_kx_k^{\mathsf T}$ and
-$d_q\leftarrow d_q+R_kx_k$.
+with ridge 1 and $c=0.5$. A separate model for each tuple permits parameter
+interactions without claiming linearity in $\kappa$, $\beta$, $m$, or
+$b_{\rm init}$. The nonlinear CCA and decoding maps stay outside the learner;
+only their aggregated MAC consequences enter $x_k$.
 
-The reward is local as well. Let $A_k$ be effective-airtime fraction,
-$D_{95,k}$ P95 delay, $s_k$ the node's successful-busy share, and $P_{f,k}$ its
-failure ratio:
+The reward is local. Let $A_k$ be effective-airtime fraction, $D_{95,k}$ P95
+delay, $s_k$ successful-busy share, and $P_{f,k}$ failure ratio:
 \begin{align}
-U_A&=\operatorname{clip}(\hat n_kA_k,0,1),\\
+U_A&=\operatorname{clip}(\hat n_kA_k,0,1),\nonumber\\
 U_D&=1-\operatorname{clip}
- \left(\frac{D_{95,k}}{16\,\mathrm{ms}\,\hat n_k},0,1\right),\\
+ \left(\frac{D_{95,k}}{16\,\mathrm{ms}\,\hat n_k},0,1\right),\nonumber\\
 U_S&=1-\operatorname{clip}
- \left(\frac{|s_k-1/\hat n_k|}{1/\hat n_k},0,1\right),\\
+ \left(\frac{|s_k-1/\hat n_k|}{1/\hat n_k},0,1\right),\nonumber\\
 R_k&=(U_A+U_D+U_S)/3-0.25P_{f,k}.
 \label{eq:reward}
 \end{align}
-Every transmitter owns a controller initialized from the same offline model.
-After eight observations, the event implementation decides every 32 global
-contention rounds; the packet implementation decides every 32 completed local
-attempts. A decision affects the next recovery only, never a countdown already
-in progress.
+After receiving $R_k$, only the selected model is updated:
+$A_q\leftarrow A_q+x_kx_k^{\mathsf T}$ and
+$d_q\leftarrow d_q+R_kx_k$. No global fairness, peer queue, peer action, or
+cross-technology message appears in this update.
 
-\subsection{Initialization and Online Sequence}
-
-Offline initialization evaluates every arm under 11 topology, load,
-interference, and sensing conditions using three training seeds. Those samples
-populate the 24 linear models before formal evaluation; none of the ten formal
-event seeds is used for initialization or fixed-oracle selection. The same
-initial model is copied to each transmitter, but subsequent contexts, choices,
-rewards, and updates are local.
-
-An online step follows the protocol clock. The node first aggregates its latest
-history into $x_k$, selects $q^*$ with \eqref{eq:linucb}, and applies that tuple
-only when the current attempt has completed. It then observes the next reward
-window and updates the chosen arm. Separating observation, selection,
-application, and reward assignment prevents an action from receiving credit
-for a countdown that began under an earlier profile.
+Both profile models are warm-started from 73,541 local
+$(x_k,q,R_k)$ samples generated by the discovery runs. The global evaluation
+utility is used to screen the two profiles but never enters this fit. Every
+node receives the same initial model; its later history and updates are
+independent. After eight observations, a decision occurs every 32 contention
+rounds and applies only after the current attempt completes, so credit is not
+assigned to a countdown begun under an earlier profile.

@@ -1,0 +1,2 @@
+scenario_id,family,seed_count,baseline_mean,candidate_mean,utility_difference,relative_difference,lower_95,upper_95,positive_seeds,collision_difference,effective_airtime_difference,p95_delay_difference,fairness_difference
+repeated-poisson-n04-p025-n06-p045,repeated,32,0.7539105407872498,0.7528452628374224,-0.0010652779498274458,-0.0014130031246347334,-0.0013284511034471335,-0.0007994491349393538,3,-0.03100299835205078,-0.013656614874866805,2179.71875,-0.008432030238653635

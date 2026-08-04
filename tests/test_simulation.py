@@ -362,6 +362,63 @@ def test_dynamic_windows_change_active_sets_without_losing_rounds() -> None:
     assert rows[230]["active_node_ids"] == ["wifi-000"]
 
 
+def test_explicit_phases_repeat_with_exact_change_points_and_active_sets() -> None:
+    from dblbt_fcn.simulation import simulate_job_records
+
+    phases = [
+        {
+            "id": "light",
+            "duration_rounds": 32,
+            "active_wifi_nodes": 1,
+            "active_nru_nodes": 1,
+            "poisson_rate_packets_ms": 0.015,
+        },
+        {
+            "id": "dense",
+            "duration_rounds": 32,
+            "active_wifi_nodes": 2,
+            "active_nru_nodes": 2,
+            "poisson_rate_packets_ms": 0.03,
+        },
+    ]
+    rows = list(
+        simulate_job_records(
+            make_job(
+                "tmc_db_lbt",
+                rounds=128,
+                traffic="poisson",
+                poisson_rate_packets_ms=0.015,
+                phases=phases,
+                phase_repetitions=2,
+            )
+        )
+    )
+
+    assert [rows[index]["phase_id"] for index in (0, 31, 32, 63, 64)] == [
+        "light",
+        "light",
+        "dense",
+        "dense",
+        "light",
+    ]
+    assert [row["round_id"] for row in rows if row["change_point"]] == [
+        0,
+        32,
+        64,
+        96,
+    ]
+    assert rows[0]["phase_round"] == 0
+    assert rows[31]["phase_round"] == 31
+    assert rows[32]["phase_round"] == 0
+    assert rows[0]["active_node_ids"] == ["wifi-000", "nru-000"]
+    assert rows[32]["active_node_ids"] == [
+        "wifi-000",
+        "wifi-001",
+        "nru-000",
+        "nru-001",
+    ]
+
+
 def test_dynamic_poisson_waits_for_real_source_arrival_before_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -707,7 +764,7 @@ def test_run_job_returns_portable_completed_manifest_without_foreign_access(
     import dblbt_fcn.simulation as simulation
     from dblbt_fcn.experiment import artifact_paths, job_is_complete
 
-    repository_root = Path(__file__).resolve().parents[1]
+    repository_root = Path("/mnt/d/Codex-work")
     with tempfile.TemporaryDirectory(
         prefix="portable-resume-", dir=repository_root
     ) as directory:

@@ -20,7 +20,7 @@ from .metrics import evaluation_utility, jain, nearest_rank_p95
 from .provenance import ExecutionProvenance
 
 
-_ROW_FIELDS = {
+_LEGACY_ROW_FIELDS = {
     "schema_version",
     "record_type",
     "run_id",
@@ -44,6 +44,13 @@ _ROW_FIELDS = {
     "decisions",
     "training_samples",
 }
+_PHASE_ROW_FIELDS = {
+    "phase_id",
+    "phase_index",
+    "phase_round",
+    "change_point",
+}
+_ROW_FIELDS = _LEGACY_ROW_FIELDS | _PHASE_ROW_FIELDS
 _SENDER_FIELDS = {
     "node_id",
     "technology",
@@ -253,7 +260,15 @@ def _validate_row(
     expected_round: int,
     provenance: ExecutionProvenance,
 ) -> dict[str, Any]:
-    row = _mapping(value, _ROW_FIELDS, "raw row")
+    if type(value) is not dict:
+        raise ValueError("raw row has invalid fields")
+    row_fields = set(value)
+    if row_fields == _LEGACY_ROW_FIELDS:
+        if job.scenario.phases:
+            raise ValueError("phased raw row is missing phase metadata")
+    elif row_fields != _ROW_FIELDS:
+        raise ValueError("raw row has invalid fields")
+    row = value
     expected_identity = {
         "schema_version": 1,
         "record_type": "contention_round",
@@ -273,6 +288,53 @@ def _validate_row(
     if row["kind"] not in {"success", "collision"}:
         raise ValueError("raw row kind is invalid")
     topology = _topology(job)
+    phases = job.scenario.phases
+    expected_phase = None
+    if phases:
+        cycle_round = expected_round % sum(
+            phase.duration_rounds for phase in phases
+        )
+        phase_start = 0
+        for phase_index, phase in enumerate(phases):
+            phase_end = phase_start + phase.duration_rounds
+            if cycle_round < phase_end:
+                expected_phase = (
+                    phase,
+                    phase_index,
+                    cycle_round - phase_start,
+                )
+                break
+            phase_start = phase_end
+        if expected_phase is None:
+            raise RuntimeError("phase schedule failed to cover a raw row")
+
+    if _PHASE_ROW_FIELDS.issubset(row_fields):
+        if type(row["change_point"]) is not bool:
+            raise ValueError("phase metadata has invalid change_point")
+        if expected_phase is None:
+            expected_metadata = (None, None, None, False)
+        else:
+            phase, phase_index, phase_round = expected_phase
+            expected_metadata = (
+                phase.id,
+                phase_index,
+                phase_round,
+                expected_round == 0 or phase_round == 0,
+            )
+            if type(row["phase_id"]) is not str:
+                raise ValueError("phase metadata has invalid phase_id")
+            if type(row["phase_index"]) is not int:
+                raise ValueError("phase metadata has invalid phase_index")
+            if type(row["phase_round"]) is not int:
+                raise ValueError("phase metadata has invalid phase_round")
+        actual_metadata = (
+            row["phase_id"],
+            row["phase_index"],
+            row["phase_round"],
+            row["change_point"],
+        )
+        if actual_metadata != expected_metadata:
+            raise ValueError("phase metadata does not match configured schedule")
     node_ids = _strings(row["node_ids"], "node_ids")
     technologies = _strings(row["technologies"], "technologies")
     if len(node_ids) != len(technologies):
@@ -294,12 +356,24 @@ def _validate_row(
         _strings(row["backlogged_node_ids"], "backlogged_node_ids"),
         "backlogged_node_ids",
     )
-    join_interval = job.scenario.join_interval_rounds
-    lifetime = job.scenario.lifetime_rounds
     topology_ids = list(topology)
-    if join_interval is None or lifetime is None:
+    if expected_phase is not None:
+        phase = expected_phase[0]
+        expected_active = [
+            f"wifi-{index:03d}"
+            for index in range(phase.active_wifi_nodes)
+        ] + [
+            f"nru-{index:03d}"
+            for index in range(phase.active_nru_nodes)
+        ]
+    elif (
+        job.scenario.join_interval_rounds is None
+        or job.scenario.lifetime_rounds is None
+    ):
         expected_active = topology_ids
     else:
+        join_interval = job.scenario.join_interval_rounds
+        lifetime = job.scenario.lifetime_rounds
         cycle = ((len(topology_ids) - 1) * join_interval) + lifetime
         phase = expected_round % cycle
         expected_active = [

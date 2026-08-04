@@ -1,0 +1,92 @@
+version: 1
+name: linucb-regime-confirmation
+rounds: 100000
+alpha: 11
+timing:
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+seeds:
+- 4001
+- 4003
+- 4007
+- 4013
+- 4019
+- 4021
+- 4027
+- 4049
+- 4051
+- 4057
+policies:
+- primary_db_lbt
+- tmc_db_lbt
+- adaptive_db_lbt
+conditions: []
+arm_ids: []
+scenarios:
+- id: combined-b
+  wifi_nodes: 4
+  nru_nodes: 4
+  legacy_ap_nodes: 0
+  legacy_sta_nodes: 0
+  traffic: poisson
+  poisson_rate_packets_ms: 0.035
+  interference_interval_ms: 30
+  interference_duration_us: 2000
+  interruption_std: 0.4
+  join_interval_rounds: 10
+  lifetime_rounds: 200
+  trace: false
+- id: load-p025
+  wifi_nodes: 4
+  nru_nodes: 4
+  legacy_ap_nodes: 0
+  legacy_sta_nodes: 0
+  traffic: poisson
+  poisson_rate_packets_ms: 0.025
+  interference_interval_ms: null
+  interference_duration_us: null
+  interruption_std: 0.0
+  join_interval_rounds: null
+  lifetime_rounds: null
+  trace: false
+- id: occupancy-i100-d2000
+  wifi_nodes: 4
+  nru_nodes: 4
+  legacy_ap_nodes: 0
+  legacy_sta_nodes: 0
+  traffic: poisson
+  poisson_rate_packets_ms: 0.035
+  interference_interval_ms: 100
+  interference_duration_us: 2000
+  interruption_std: 0.0
+  join_interval_rounds: null
+  lifetime_rounds: null
+  trace: false
+- id: sensing-p035-s08
+  wifi_nodes: 4
+  nru_nodes: 4
+  legacy_ap_nodes: 0
+  legacy_sta_nodes: 0
+  traffic: poisson
+  poisson_rate_packets_ms: 0.035
+  interference_interval_ms: null
+  interference_duration_us: null
+  interruption_std: 0.8
+  join_interval_rounds: null
+  lifetime_rounds: null
+  trace: false
+- id: turnover-j10-l200
+  wifi_nodes: 4
+  nru_nodes: 4
+  legacy_ap_nodes: 0
+  legacy_sta_nodes: 0
+  traffic: poisson
+  poisson_rate_packets_ms: 0.035
+  interference_interval_ms: null
+  interference_duration_us: null
+  interruption_std: 0.0
+  join_interval_rounds: 10
+  lifetime_rounds: 200
+  trace: false

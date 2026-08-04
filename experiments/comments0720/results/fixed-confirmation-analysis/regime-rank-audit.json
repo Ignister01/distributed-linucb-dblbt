@@ -1,0 +1,1 @@
+{"arm_count":24,"best_global_arm":16,"bootstrap_resamples":10000,"bootstrap_seed":20260803,"conflict_count":1,"input_file":"fixed-arm-confirmation-summary.csv","input_sha256":"a46d562980aca41ed3a35477cbb7d4ca6e04bec1c493ae8b7fe4d2f31325c87a","minimax_arm":16,"scenario_count":2,"schema_version":1,"seed_count":32}

@@ -1,6 +1,6 @@
 cff-version: 1.2.0
 message: "If you use this software or its experimental artifacts, please cite the associated paper."
-title: "Distributed LinUCB-Based Adaptive DB-LBT for Wi-Fi/NR-U Coexistence"
+title: "Distributed LinUCB-Based Adaptive DB-LBT with Local Observations for Wi-Fi/NR-U Coexistence"
 type: software
 authors:
   - family-names: Wang
@@ -11,6 +11,10 @@ authors:
     given-names: Yinuo
     affiliation: Shanghai Customs University
     email: liuyinuo@shcc.edu.cn
+  - family-names: Xu
+    given-names: Hao
+    affiliation: Tongji University
+    email: hxu@tongji.edu.cn
 repository-code: "https://github.com/Ignister01/distributed-linucb-dblbt"
 url: "https://github.com/Ignister01/distributed-linucb-dblbt"
 license: MIT

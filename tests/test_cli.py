@@ -18,6 +18,10 @@ COMMANDS = {
     "sweep",
     "pretrain",
     "summarize",
+    "regime-report",
+    "regime-rank",
+    "adaptation-report",
+    "regime-confirmation",
     "plot",
     "audit",
     "cross-validate",
@@ -536,6 +540,128 @@ def test_summarize_cli_routes_paths(
         "workers": 2,
     }
     assert result.output == f"output={output} rows=2\n"
+
+
+def test_regime_report_cli_writes_effects_and_selection(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = import_module("dblbt_fcn.cli")
+    summary = tmp_path / "summary.csv"
+    effects = tmp_path / "effects.csv"
+    selection = tmp_path / "selected.txt"
+    observed: dict[str, object] = {}
+    effect_rows = [object(), object()]
+
+    monkeypatch.setattr(cli, "load_summary", lambda path: [str(path)])
+    monkeypatch.setattr(
+        cli, "scenario_effects", lambda rows: effect_rows, raising=False
+    )
+    monkeypatch.setattr(
+        cli,
+        "write_effects_csv",
+        lambda rows, path: observed.update(effects=(rows, path)),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "select_confirmation_scenarios",
+        lambda rows: ("load-a",),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        cli,
+        "write_selected_scenarios",
+        lambda rows, path: observed.update(selection=(rows, path)),
+        raising=False,
+    )
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "regime-report",
+            "--summary",
+            str(summary),
+            "--effects-output",
+            str(effects),
+            "--selection-output",
+            str(selection),
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert observed == {
+        "effects": (effect_rows, effects),
+        "selection": (("load-a",), selection),
+    }
+    assert result.output == "effects=2 selected=1\n"
+
+
+def test_regime_confirmation_cli_writes_generated_matrix(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    cli = import_module("dblbt_fcn.cli")
+    pilot_path = tmp_path / "pilot.yaml"
+    selection_path = tmp_path / "selected.txt"
+    output = tmp_path / "confirmation.yaml"
+    observed: dict[str, object] = {}
+    pilot = object()
+    generated = type("Generated", (), {"scenarios": (object(), object())})()
+
+    monkeypatch.setattr(cli, "load_matrix", lambda path: pilot)
+    monkeypatch.setattr(
+        cli,
+        "load_selected_scenarios",
+        lambda path: ("load-a", "occupancy-a"),
+        raising=False,
+    )
+    def fake_confirmation(matrix: object, selected: object, **options: object):
+        observed["confirmation"] = (matrix, selected, options)
+        return generated
+
+    monkeypatch.setattr(cli, "confirmation_matrix", fake_confirmation, raising=False)
+    monkeypatch.setattr(
+        cli,
+        "write_confirmation_matrix",
+        lambda matrix, path: observed.update(write=(matrix, path)),
+        raising=False,
+    )
+    monkeypatch.setattr(cli, "expand_matrix", lambda matrix: [object()] * 60)
+
+    result = CliRunner().invoke(
+        cli.app,
+        [
+            "regime-confirmation",
+            "--pilot-matrix",
+            str(pilot_path),
+            "--selection",
+            str(selection_path),
+            "--output",
+            str(output),
+            "--name",
+            "large-effect-confirmation",
+            "--rounds",
+            "120000",
+            "--seed",
+            "6101",
+            "--seed",
+            "6113",
+        ],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert observed == {
+        "confirmation": (
+            pilot,
+            ("load-a", "occupancy-a"),
+            {
+                "name": "large-effect-confirmation",
+                "rounds": 120_000,
+                "seeds": (6101, 6113),
+            },
+        ),
+        "write": (generated, output),
+    }
+    assert result.output == "output=" + str(output) + " scenarios=2 jobs=60\n"
 
 
 def test_plot_and_audit_cli_forward_workers(

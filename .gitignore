@@ -36,3 +36,6 @@ logs/*.log
 /paper/*.out
 /paper/*.synctex.gz
 /tmp/
+experiments/linucb-regime-discovery/results/pilot-runs/
+experiments/linucb-regime-discovery/results/confirmation-runs/
+experiments/comments0720/results/*-runs/

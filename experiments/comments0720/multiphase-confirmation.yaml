@@ -1,0 +1,63 @@
+version: 1
+name: comments0720-multiphase-confirmation
+rounds: 32768
+alpha: 11
+timing:
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+seeds:
+  - 10103
+  - 10111
+  - 10133
+  - 10139
+  - 10141
+  - 10151
+  - 10159
+  - 10163
+  - 10169
+  - 10177
+  - 10181
+  - 10193
+  - 10211
+  - 10223
+  - 10243
+  - 10247
+  - 10253
+  - 10259
+  - 10267
+  - 10271
+  - 10273
+  - 10289
+  - 10301
+  - 10303
+  - 10313
+  - 10321
+  - 10331
+  - 10333
+  - 10337
+  - 10343
+  - 10357
+  - 10369
+policies: [tmc_db_lbt, adaptive_db_lbt]
+conditions: []
+arm_ids: []
+scenarios:
+  - id: repeated-poisson-n04-p025-n06-p045
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    phase_repetitions: 4
+    phases:
+      - id: low-n04-p025
+        duration_rounds: 4096
+        active_wifi_nodes: 4
+        active_nru_nodes: 4
+        poisson_rate_packets_ms: 0.025
+      - id: high-n06-p045
+        duration_rounds: 4096
+        active_wifi_nodes: 6
+        active_nru_nodes: 6
+        poisson_rate_packets_ms: 0.045

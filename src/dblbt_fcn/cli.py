@@ -17,6 +17,21 @@ from .cross_validation import (
     write_cross_model_evidence,
 )
 from .stats import load_summary
+from .regime import (
+    CONFIRMATION_SEEDS,
+    confirmation_matrix,
+    load_selected_scenarios,
+    scenario_effects,
+    select_confirmation_scenarios,
+    write_confirmation_matrix,
+    write_effects_csv,
+    write_selected_scenarios,
+)
+from .regime_evidence import (
+    rank_fixed_arms,
+    write_adaptation_manifest_report,
+    write_fixed_arm_report,
+)
 from .workflows import (
     action_grid_hash,
     build_pretraining,
@@ -210,6 +225,84 @@ def summarize(
     try:
         rows = summarize_manifests(manifest_dir, output, workers=workers)
         typer.echo(f"output={output} rows={len(rows)}")
+    except Exception as error:
+        _fail(error)
+
+
+@app.command("regime-report")
+def regime_report(
+    summary: Path = typer.Option(..., "--summary"),
+    effects_output: Path = typer.Option(..., "--effects-output"),
+    selection_output: Path | None = typer.Option(None, "--selection-output"),
+) -> None:
+    """Compute strict per-scenario Adaptive-versus-TMC paired effects."""
+    try:
+        effects = scenario_effects(load_summary(summary))
+        write_effects_csv(effects, effects_output)
+        selected: tuple[str, ...] = ()
+        if selection_output is not None:
+            selected = select_confirmation_scenarios(effects)
+            write_selected_scenarios(selected, selection_output)
+        typer.echo(f"effects={len(effects)} selected={len(selected)}")
+    except Exception as error:
+        _fail(error)
+
+
+@app.command("regime-rank")
+def regime_rank(
+    summary: Path = typer.Argument(...),
+    output_dir: Path = typer.Option(..., "--output-dir"),
+) -> None:
+    """Rank fixed profiles and identify incompatible scenario optima."""
+    try:
+        analysis = rank_fixed_arms(load_summary(summary))
+        outputs = write_fixed_arm_report(
+            analysis, output_dir, input_path=summary
+        )
+        typer.echo(
+            f"scenarios={analysis.scenario_count} "
+            f"conflicts={len(analysis.conflicts)} files={len(outputs)}"
+        )
+    except Exception as error:
+        _fail(error)
+
+
+@app.command("adaptation-report")
+def adaptation_report(
+    manifest_dir: Path = typer.Argument(...),
+    output_dir: Path = typer.Option(..., "--output-dir"),
+) -> None:
+    """Measure persistent local-reward recovery after phase changes."""
+    try:
+        outputs = write_adaptation_manifest_report(manifest_dir, output_dir)
+        typer.echo(f"files={len(outputs)}")
+    except Exception as error:
+        _fail(error)
+
+
+@app.command("regime-confirmation")
+def regime_confirmation(
+    pilot_matrix: Path = typer.Option(..., "--pilot-matrix"),
+    selection: Path = typer.Option(..., "--selection"),
+    output: Path = typer.Option(..., "--output"),
+    name: str = typer.Option("linucb-regime-confirmation", "--name"),
+    rounds: int = typer.Option(100_000, "--rounds"),
+    seed: list[int] | None = typer.Option(None, "--seed"),
+) -> None:
+    """Generate the full-length independent confirmation matrix."""
+    try:
+        matrix = confirmation_matrix(
+            load_matrix(pilot_matrix),
+            load_selected_scenarios(selection),
+            name=name,
+            rounds=rounds,
+            seeds=CONFIRMATION_SEEDS if seed is None else tuple(seed),
+        )
+        write_confirmation_matrix(matrix, output)
+        typer.echo(
+            f"output={output} scenarios={len(matrix.scenarios)} "
+            f"jobs={len(expand_matrix(matrix))}"
+        )
     except Exception as error:
         _fail(error)
 

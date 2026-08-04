@@ -47,6 +47,7 @@ def _controller(
     feature_mask: object = None,
     online_updates: bool = True,
     collision_weight: float = 0.25,
+    allowed_arms: object = None,
 ):
     from dblbt_fcn.adaptive import AdaptiveController
 
@@ -56,6 +57,7 @@ def _controller(
         feature_mask=feature_mask,
         online_updates=online_updates,
         collision_weight=collision_weight,
+        allowed_arms=allowed_arms,
     )
 
 
@@ -267,6 +269,23 @@ def test_cold_start_waits_for_strict_global_round_32_boundary() -> None:
         node.db_initialized,
         node.deterministic_countdown,
     ) == before
+
+
+def test_controller_restricts_every_linucb_decision_to_allowed_arms() -> None:
+    controller = _controller(
+        [_adaptive_node("w1"), _adaptive_node("n1", technology=Technology.NRU)],
+        allowed_arms=(4, 20),
+    )
+
+    for _ in range(256):
+        controller.step()
+
+    assert controller.decisions
+    assert {decision.new_arm for decision in controller.decisions} <= {4, 20}
+    assert all(
+        decision.profile == adaptive_arms()[decision.new_arm]
+        for decision in controller.decisions
+    )
 
 
 def test_second_boundary_updates_only_node_with_interval_attempts() -> None:

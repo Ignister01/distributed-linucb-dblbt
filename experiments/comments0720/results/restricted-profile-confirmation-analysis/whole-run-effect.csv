@@ -1,0 +1,2 @@
+scope,scenario_id,candidate,baseline,seed_count,utility_difference,utility_lower_95,utility_upper_95,positive_seeds,collision_difference,effective_airtime_difference,p95_delay_difference_us,fairness_difference
+whole-run-diagnostic,all-phases-mixed-active-set,adaptive_db_lbt,tmc_db_lbt,32,-0.0006679409423830003,-0.0009207497290016143,-0.000413193551202872,6,-0.03228759765625,-0.013570036396253489,2239.5625,-0.008170359673083043

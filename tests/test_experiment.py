@@ -273,6 +273,186 @@ def test_scenario_rejects_invalid_ranges_and_field_combinations(
         ScenarioSpec.model_validate(scenario_values(**updates))
 
 
+def test_scenario_accepts_explicit_repeated_poisson_phases() -> None:
+    scenario = ScenarioSpec.model_validate(
+        scenario_values(
+            traffic="poisson",
+            poisson_rate_packets_ms=0.015,
+            phases=[
+                {
+                    "id": "light",
+                    "duration_rounds": 64,
+                    "active_wifi_nodes": 1,
+                    "active_nru_nodes": 1,
+                    "poisson_rate_packets_ms": 0.015,
+                },
+                {
+                    "id": "dense",
+                    "duration_rounds": 96,
+                    "active_wifi_nodes": 2,
+                    "active_nru_nodes": 2,
+                    "poisson_rate_packets_ms": 0.03,
+                },
+            ],
+            phase_repetitions=3,
+        )
+    )
+
+    assert [phase.id for phase in scenario.phases] == ["light", "dense"]
+    assert [phase.duration_rounds for phase in scenario.phases] == [64, 96]
+    assert scenario.phase_repetitions == 3
+
+
+def test_unphased_scenario_keeps_legacy_canonical_identity() -> None:
+    scenario = ScenarioSpec.model_validate(scenario_values())
+
+    assert canonical_json(scenario) == (
+        '{"id":"static-2x2","interference_duration_us":null,'
+        '"interference_interval_ms":null,"interruption_std":0.0,'
+        '"join_interval_rounds":null,"legacy_ap_nodes":0,'
+        '"legacy_sta_nodes":0,"lifetime_rounds":null,"nru_nodes":2,'
+        '"poisson_rate_packets_ms":null,"trace":false,'
+        '"traffic":"saturated","wifi_nodes":2}'
+    )
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {
+            "traffic": "poisson",
+            "poisson_rate_packets_ms": 0.02,
+            "phases": [
+                {
+                    "id": "empty",
+                    "duration_rounds": 32,
+                    "active_wifi_nodes": 0,
+                    "active_nru_nodes": 0,
+                    "poisson_rate_packets_ms": 0.02,
+                }
+            ],
+        },
+        {
+            "traffic": "poisson",
+            "poisson_rate_packets_ms": 0.02,
+            "phases": [
+                {
+                    "id": "too-many-wifi",
+                    "duration_rounds": 32,
+                    "active_wifi_nodes": 3,
+                    "active_nru_nodes": 1,
+                    "poisson_rate_packets_ms": 0.02,
+                }
+            ],
+        },
+        {
+            "traffic": "poisson",
+            "poisson_rate_packets_ms": 0.02,
+            "phases": [
+                {
+                    "id": "too-many-nru",
+                    "duration_rounds": 32,
+                    "active_wifi_nodes": 1,
+                    "active_nru_nodes": 3,
+                    "poisson_rate_packets_ms": 0.02,
+                }
+            ],
+        },
+        {
+            "traffic": "poisson",
+            "poisson_rate_packets_ms": 0.02,
+            "phases": [
+                {
+                    "id": "same",
+                    "duration_rounds": 32,
+                    "active_wifi_nodes": 1,
+                    "active_nru_nodes": 1,
+                    "poisson_rate_packets_ms": 0.02,
+                },
+                {
+                    "id": "same",
+                    "duration_rounds": 64,
+                    "active_wifi_nodes": 2,
+                    "active_nru_nodes": 2,
+                    "poisson_rate_packets_ms": 0.03,
+                },
+            ],
+        },
+        {
+            "traffic": "poisson",
+            "poisson_rate_packets_ms": 0.02,
+            "join_interval_rounds": 10,
+            "lifetime_rounds": 200,
+            "phases": [
+                {
+                    "id": "mixed-schedulers",
+                    "duration_rounds": 32,
+                    "active_wifi_nodes": 1,
+                    "active_nru_nodes": 1,
+                    "poisson_rate_packets_ms": 0.02,
+                }
+            ],
+        },
+        {
+            "traffic": "poisson",
+            "poisson_rate_packets_ms": 0.02,
+            "legacy_ap_nodes": 1,
+            "phases": [
+                {
+                    "id": "legacy-ambiguous",
+                    "duration_rounds": 32,
+                    "active_wifi_nodes": 1,
+                    "active_nru_nodes": 1,
+                    "poisson_rate_packets_ms": 0.02,
+                }
+            ],
+        },
+        {"phase_repetitions": 2},
+    ],
+)
+def test_scenario_rejects_invalid_phase_combinations(
+    updates: dict[str, object],
+) -> None:
+    with pytest.raises(ValidationError):
+        ScenarioSpec.model_validate(scenario_values(**updates))
+
+
+def test_phased_job_rounds_must_equal_the_complete_schedule() -> None:
+    scenario = ScenarioSpec.model_validate(
+        scenario_values(
+            traffic="poisson",
+            poisson_rate_packets_ms=0.02,
+            phases=[
+                {
+                    "id": "light",
+                    "duration_rounds": 32,
+                    "active_wifi_nodes": 1,
+                    "active_nru_nodes": 1,
+                    "poisson_rate_packets_ms": 0.02,
+                },
+                {
+                    "id": "dense",
+                    "duration_rounds": 64,
+                    "active_wifi_nodes": 2,
+                    "active_nru_nodes": 2,
+                    "poisson_rate_packets_ms": 0.03,
+                },
+            ],
+            phase_repetitions=2,
+        )
+    )
+    payload = {
+        **one_job().model_dump(),
+        "scenario": scenario,
+        "rounds": 191,
+    }
+
+    with pytest.raises(ValidationError, match="phase schedule"):
+        JobSpec.model_validate(payload)
+
+    assert JobSpec.model_validate({**payload, "rounds": 192}).rounds == 192
+
+
 def test_interruption_negative_zero_has_one_canonical_representation() -> None:
     positive = ScenarioSpec.model_validate(
         scenario_values(interruption_std=0.0)
@@ -387,6 +567,21 @@ def test_ablation_conditions_map_to_adaptive_policy() -> None:
     assert {job.policy for job in jobs} == {"adaptive_db_lbt"}
     assert {job.ablation for job in jobs} == expected
     assert all(job.arm_id is None for job in jobs)
+
+
+def test_restricted_profiles_condition_is_a_valid_adaptive_job() -> None:
+    matrix = MatrixSpec.model_validate(
+        matrix_values(
+            policies=["adaptive_db_lbt"],
+            conditions=["restricted_profiles"],
+        )
+    )
+
+    jobs = expand_matrix(matrix)
+
+    assert len(jobs) == 1
+    assert jobs[0].policy == "adaptive_db_lbt"
+    assert jobs[0].ablation == "restricted_profiles"
 
 
 def test_pretrain_is_one_factor_at_a_time_around_static_4x4() -> None:

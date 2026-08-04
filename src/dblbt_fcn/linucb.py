@@ -2,6 +2,7 @@
 
 import math
 import os
+from collections.abc import Sequence
 from numbers import Integral, Real
 from os import PathLike
 from pathlib import Path
@@ -153,12 +154,35 @@ class LinUCB:
             (self.num_arms, self.context_dim), dtype=np.float64
         )
 
-    def select(self, context: object) -> int:
+    def select(
+        self,
+        context: object,
+        *,
+        candidate_arms: object = None,
+    ) -> int:
         """Return the lowest-index arm attaining the largest LinUCB score."""
         x = self._context(context)
-        best_arm = 0
+        if candidate_arms is None:
+            candidates = tuple(range(self.num_arms))
+        else:
+            if isinstance(candidate_arms, (str, bytes)) or not isinstance(
+                candidate_arms, Sequence
+            ):
+                raise ValueError("candidate_arms must be a nonempty sequence")
+            candidates = tuple(candidate_arms)
+            if (
+                not candidates
+                or any(type(arm) is not int for arm in candidates)
+                or any(not 0 <= arm < self.num_arms for arm in candidates)
+                or len(set(candidates)) != len(candidates)
+            ):
+                raise ValueError(
+                    "candidate_arms must contain unique configured arm integers"
+                )
+            candidates = tuple(sorted(candidates))
+        best_arm = candidates[0]
         best_score = -math.inf
-        for arm in range(self.num_arms):
+        for arm in candidates:
             try:
                 estimate = np.linalg.solve(self.A[arm], self.b[arm])
                 uncertainty_vector = np.linalg.solve(self.A[arm], x)

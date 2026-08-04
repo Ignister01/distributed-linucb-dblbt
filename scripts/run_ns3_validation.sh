@@ -313,6 +313,7 @@ write_job_manifest() {
     return 2
   fi
   local output job_id database manifest temporary database_hash database_bytes
+  local sim_time_s shadowing_enabled
   output="$(realpath -m -- "$1")"
   job_id="$2"
   [[ "$job_id" =~ ^[a-z0-9-]+(__seed-[0-9]+__[a-z]+)?$ ]] || {
@@ -324,20 +325,24 @@ write_job_manifest() {
   strict_validate_database "$database" "$job_id"
   database_hash="$(sha256_file "$database")"
   database_bytes="$(stat -c %s -- "$database")"
+  sim_time_s="$(sqlite3 "$database" "SELECT sim_time_s FROM validation_metadata;")"
+  shadowing_enabled="$(sqlite3 "$database" "SELECT shadowing_enabled FROM validation_metadata;")"
   mkdir -p -- "$output/manifests"
   manifest="$output/manifests/$job_id.json"
   temporary="$output/manifests/.$job_id.json.tmp.$$"
   python3 - "$temporary" "$job_id" "$database_bytes" "$database_hash" \
     "$model_sha256" "$model_export_sha256" "$action_grid_hash" \
     "$patch_bundle_sha256" "$scenario_sha256" "$node_rate_bps" \
-    "$traffic_mode" "$build_profile" <<'PY'
+    "$traffic_mode" "$build_profile" "$sim_time_s" \
+    "$shadowing_enabled" <<'PY'
 import json
 import sys
 
 (target, job_id, size, database_hash, model_hash, export_hash, grid_hash,
- patch_hash, scenario_hash, node_rate, traffic_mode, build_profile) = sys.argv[1:]
+ patch_hash, scenario_hash, node_rate, traffic_mode, build_profile,
+ sim_time_s, shadowing_enabled) = sys.argv[1:]
 manifest = {
-    "schema_version": 1,
+    "schema_version": 2,
     "status": "complete",
     "exit_code": 0,
     "job_id": job_id,
@@ -351,6 +356,8 @@ manifest = {
     "scenario_sha256": scenario_hash,
     "node_rate_bps": int(node_rate),
     "traffic_mode": traffic_mode,
+    "sim_time_s": float(sim_time_s),
+    "shadowing_enabled": bool(int(shadowing_enabled)),
     "srs_enabled": False,
     "build_profile": build_profile,
 }
@@ -367,23 +374,27 @@ job_is_complete() {
     echo "usage: job_is_complete OUTPUT_ROOT JOB_ID" >&2
     return 2
   fi
-  local output job_id database manifest
+  local output job_id database manifest sim_time_s shadowing_enabled
   output="$(realpath -m -- "$1")"
   job_id="$2"
   database="$output/databases/$job_id.db"
   manifest="$output/manifests/$job_id.json"
   [[ -f "$manifest" ]] || return 1
   validate_database_contract "$database" >/dev/null 2>&1 || return 1
+  sim_time_s="$(sqlite3 "$database" "SELECT sim_time_s FROM validation_metadata;")"
+  shadowing_enabled="$(sqlite3 "$database" "SELECT shadowing_enabled FROM validation_metadata;")"
   python3 - "$manifest" "$database" "$job_id" "$model_sha256" \
     "$model_export_sha256" "$action_grid_hash" "$patch_bundle_sha256" \
-    "$scenario_sha256" "$node_rate_bps" "$traffic_mode" "$build_profile" <<'PY'
+    "$scenario_sha256" "$node_rate_bps" "$traffic_mode" "$build_profile" \
+    "$sim_time_s" "$shadowing_enabled" <<'PY'
 import hashlib
 import json
 import os
 import sys
 
 (manifest_path, database, job_id, model_hash, export_hash, grid_hash,
- patch_hash, scenario_hash, node_rate, traffic_mode, build_profile) = sys.argv[1:]
+ patch_hash, scenario_hash, node_rate, traffic_mode, build_profile,
+ sim_time_s, shadowing_enabled) = sys.argv[1:]
 try:
     with open(manifest_path, encoding="ascii") as stream:
         actual = json.load(stream)
@@ -392,7 +403,7 @@ try:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     expected = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "complete",
         "exit_code": 0,
         "job_id": job_id,
@@ -406,6 +417,8 @@ try:
         "scenario_sha256": scenario_hash,
         "node_rate_bps": int(node_rate),
         "traffic_mode": traffic_mode,
+        "sim_time_s": float(sim_time_s),
+        "shadowing_enabled": bool(int(shadowing_enabled)),
         "srs_enabled": False,
         "build_profile": build_profile,
     }
@@ -509,7 +522,7 @@ validate_smoke_database() {
   fi
   local database="$1" policy="$2" count
   validate_database_contract "$database"
-  count="$(sqlite3 "$database" "SELECT count(*) FROM validation_metadata WHERE policy='$policy' AND alpha=11 AND context_dim=11 AND num_arms=24 AND node_rate_bps=$node_rate_bps AND traffic_mode='$traffic_mode' AND srs_enabled=0 AND model_sha256='$model_sha256' AND model_export_sha256='$model_export_sha256' AND patch_sha256='$patch_bundle_sha256' AND scenario_sha256='$scenario_sha256';")"
+  count="$(sqlite3 "$database" "SELECT count(*) FROM validation_metadata WHERE policy='$policy' AND alpha=11 AND context_dim=11 AND num_arms=24 AND node_rate_bps=$node_rate_bps AND traffic_mode='$traffic_mode' AND sim_time_s=0.8 AND shadowing_enabled=0 AND srs_enabled=0 AND model_sha256='$model_sha256' AND model_export_sha256='$model_export_sha256' AND patch_sha256='$patch_bundle_sha256' AND scenario_sha256='$scenario_sha256';")"
   [[ "$count" == "1" ]] || { echo "Smoke metadata contract failed: $policy" >&2; return 1; }
   count="$(sqlite3 "$database" "SELECT count(*)=2 AND count(DISTINCT state_id)=2 AND sum(technology='wifi')=1 AND sum(technology='nru')=1 FROM dblbt_nodes;")"
   [[ "$count" == "1" ]] || { echo "Smoke locality contract failed: $policy" >&2; return 1; }
@@ -539,6 +552,7 @@ run_smoke_policy() {
   run_binary \
     --policy="$policy" --scenario="smoke-$policy" --wifiAps=1 --nruGnbs=1 \
     --simTime=0.8 --appStart=0.2 --seed=410 --runId=1 --nodeRate=2Mbps \
+    --shadowingEnabled=false \
     --modelPath="$MODEL_PATH" --modelSha256="$model_sha256" \
     --modelExportSha256="$model_export_sha256" --actionGridHash="$action_grid_hash" \
     --patchSha256="$patch_bundle_sha256" --scenarioSha256="$scenario_sha256" \
@@ -582,6 +596,7 @@ run_formal_job() {
     --formal=true --policy="$policy" --scenario="$scenario" \
     --wifiAps="$wifi_aps" --nruGnbs="$nru_gnbs" \
     --simTime=2.0 --appStart=0.2 --seed="$seed" --runId=1 --nodeRate=2Mbps \
+    --shadowingEnabled=true \
     --interferenceIntervalMs="$interval" --interferenceDurationMs=2 \
     --modelPath="$MODEL_PATH" --modelSha256="$model_sha256" \
     --modelExportSha256="$model_export_sha256" --actionGridHash="$action_grid_hash" \
@@ -636,7 +651,7 @@ report = audit_ns3_validation(
     expected_build_profile=profile,
 )
 payload = {
-    "schema_version": 1,
+    "schema_version": 2,
     "audited": report.audited,
     "adaptive_decisions": report.adaptive_decisions,
     "model_sha256": report.model_sha256,

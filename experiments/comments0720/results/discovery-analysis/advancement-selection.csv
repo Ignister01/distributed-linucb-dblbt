@@ -1,0 +1,2 @@
+status,scenario_a,scenario_b,best_arm_a,best_arm_b,profile_a,profile_b,margin_a_over_b,lower_a_over_b,margin_b_over_a,lower_b_over_a,jain_loss_a,jain_loss_b,summary_sha256,conflicts_sha256
+advance,poisson-n04-p025,poisson-n06-p045,4,20,"(11;5;2;10;15)","(11;7;3;6;15)",0.0192503893770782,0.0165926632964993,0.000354133895969796,0.0000908566160482405,0.00000163716249179657,0.00000917891546037275,019168f6c2f47796ea0f1b9e026216dd88b0b0f81fc471695a93dfc1dce224f0,ceb635d573d87ad16c78eb9759df9511905f6bd07db09421d223cbf08a147ca2

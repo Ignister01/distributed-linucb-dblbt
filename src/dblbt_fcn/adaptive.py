@@ -280,6 +280,7 @@ class AdaptiveController:
         feature_mask: Sequence[bool] | Sequence[int] | None = None,
         online_updates: bool = True,
         collision_weight: Real = 0.25,
+        allowed_arms: Sequence[int] | None = None,
         interruption_perturbations: Mapping[
             str, InterruptionPerturbation
         ] | None = None,
@@ -300,10 +301,26 @@ class AdaptiveController:
         weight = _finite_real("collision_weight", collision_weight)
         if weight < 0:
             raise ValueError("collision_weight must be non-negative")
+        if allowed_arms is None:
+            normalized_allowed_arms: tuple[int, ...] | None = None
+        else:
+            values = tuple(allowed_arms)
+            if (
+                not isinstance(agent, LinUCB)
+                or not values
+                or any(type(arm) is not int for arm in values)
+                or any(not 0 <= arm < len(arms) for arm in values)
+                or len(set(values)) != len(values)
+            ):
+                raise ValueError(
+                    "allowed_arms must contain unique LinUCB arm integers"
+                )
+            normalized_allowed_arms = tuple(sorted(values))
 
         self.channel = channel
         self.online_updates = online_updates
         self.collision_weight = weight
+        self._allowed_arms = normalized_allowed_arms
         self._feature_mask = self._normalize_feature_mask(feature_mask)
         self._nodes = {
             node.node_id: node
@@ -662,13 +679,12 @@ class AdaptiveController:
             collision_weight=self.collision_weight,
         )
 
-    @staticmethod
     def _select_agent(
-        agent: AdaptiveSelector, context: np.ndarray
+        self, agent: AdaptiveSelector, context: np.ndarray
     ) -> int:
         if isinstance(agent, (ContextFreeUCB, FixedArmSelector)):
             return agent.select()
-        return agent.select(context)
+        return agent.select(context, candidate_arms=self._allowed_arms)
 
     @staticmethod
     def _update_agent(

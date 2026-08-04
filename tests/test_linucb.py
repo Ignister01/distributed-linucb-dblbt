@@ -65,6 +65,31 @@ def test_equal_scores_choose_the_smallest_arm() -> None:
     assert LinUCB(3, 2).select([1, 0]) == 0
 
 
+def test_candidate_selection_scores_only_declared_arms() -> None:
+    agent = LinUCB(24, 2, exploration=0.0)
+    agent.update(20, [1, 0], 1.0)
+
+    assert agent.select([1, 0], candidate_arms=(4, 20)) == 20
+    assert agent.select([1, 0], candidate_arms=(4,)) == 4
+
+
+def test_candidate_selection_breaks_ties_by_smallest_global_arm() -> None:
+    agent = LinUCB(24, 2)
+
+    assert agent.select([1, 0], candidate_arms=(20, 4)) == 4
+
+
+@pytest.mark.parametrize(
+    "candidate_arms",
+    [(), [], (4, 4), (True, 4), (-1, 4), (4, 24), (4, 20.0), "4,20", 4],
+)
+def test_candidate_selection_rejects_invalid_arm_sets(
+    candidate_arms: object,
+) -> None:
+    with pytest.raises(ValueError, match="candidate_arms"):
+        LinUCB(24, 2).select([1, 0], candidate_arms=candidate_arms)
+
+
 def test_update_changes_only_the_requested_arm() -> None:
     agent = LinUCB(3, 2)
     original_A = agent.A.copy()

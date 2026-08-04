@@ -1,0 +1,272 @@
+version: 1
+name: linucb-regime-pilot
+rounds: 20000
+alpha: 11
+timing:
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+seeds: [1709, 1871, 1999]
+policies: [tmc_db_lbt, adaptive_db_lbt]
+conditions: []
+arm_ids: []
+scenarios:
+  - id: load-p015
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.015
+  - id: load-p025
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+  - id: load-p035
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+  - id: load-p045
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.045
+  - id: load-p055
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.055
+  - id: load-p065
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.065
+  - id: load-p075
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.075
+  - id: load-p085
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.085
+
+  - id: occupancy-i010-d0500
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 10
+    interference_duration_us: 500
+  - id: occupancy-i010-d2000
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 10
+    interference_duration_us: 2000
+  - id: occupancy-i010-d5000
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 10
+    interference_duration_us: 5000
+  - id: occupancy-i030-d0500
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 30
+    interference_duration_us: 500
+  - id: occupancy-i030-d2000
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+  - id: occupancy-i030-d5000
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 30
+    interference_duration_us: 5000
+  - id: occupancy-i100-d2000
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 100
+    interference_duration_us: 2000
+  - id: occupancy-i300-d2000
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 300
+    interference_duration_us: 2000
+
+  - id: turnover-j05-l100
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 5
+    lifetime_rounds: 100
+  - id: turnover-j10-l100
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 10
+    lifetime_rounds: 100
+  - id: turnover-j10-l200
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-j20-l200
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 20
+    lifetime_rounds: 200
+  - id: turnover-j20-l400
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 20
+    lifetime_rounds: 400
+  - id: turnover-j40-l400
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    join_interval_rounds: 40
+    lifetime_rounds: 400
+
+  - id: sensing-p035-s04
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interruption_std: 0.4
+  - id: sensing-p035-s08
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interruption_std: 0.8
+  - id: sensing-p035-s12
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interruption_std: 1.2
+  - id: sensing-p055-s04
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.055
+    interruption_std: 0.4
+  - id: sensing-p055-s08
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.055
+    interruption_std: 0.8
+  - id: sensing-p055-s12
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.055
+    interruption_std: 1.2
+
+  - id: combined-a
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    interference_interval_ms: 10
+    interference_duration_us: 500
+    interruption_std: 0.4
+    join_interval_rounds: 5
+    lifetime_rounds: 100
+  - id: combined-b
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-c
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.045
+    interference_interval_ms: 30
+    interference_duration_us: 5000
+    interruption_std: 0.8
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-d
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.055
+    interference_interval_ms: 100
+    interference_duration_us: 2000
+    interruption_std: 0.8
+    join_interval_rounds: 20
+    lifetime_rounds: 400
+  - id: combined-e
+    wifi_nodes: 8
+    nru_nodes: 8
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+    interference_interval_ms: 10
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 5
+    lifetime_rounds: 100
+  - id: combined-f
+    wifi_nodes: 8
+    nru_nodes: 8
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+    interference_interval_ms: 30
+    interference_duration_us: 5000
+    interruption_std: 0.8
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: combined-g
+    wifi_nodes: 8
+    nru_nodes: 8
+    traffic: poisson
+    poisson_rate_packets_ms: 0.045
+    interference_interval_ms: 100
+    interference_duration_us: 2000
+    interruption_std: 1.2
+    join_interval_rounds: 20
+    lifetime_rounds: 400
+  - id: combined-h
+    wifi_nodes: 8
+    nru_nodes: 8
+    traffic: poisson
+    poisson_rate_packets_ms: 0.055
+    interference_interval_ms: 300
+    interference_duration_us: 2000
+    interruption_std: 1.2
+    join_interval_rounds: 40
+    lifetime_rounds: 400

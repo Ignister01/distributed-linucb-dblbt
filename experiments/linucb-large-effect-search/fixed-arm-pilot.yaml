@@ -1,0 +1,31 @@
+version: 1
+name: linucb-large-effect-fixed-arm-pilot
+rounds: 20000
+alpha: 11
+timing:
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+seeds: [7103, 7117, 7121]
+policies: [pretrain_arm]
+conditions: []
+arm_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+scenarios:
+  - id: combined-n06-p030
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    interference_interval_ms: 30
+    interference_duration_us: 2000
+    interruption_std: 0.4
+    join_interval_rounds: 10
+    lifetime_rounds: 200
+  - id: turnover-n06-p030-j10-l200
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    join_interval_rounds: 10
+    lifetime_rounds: 200

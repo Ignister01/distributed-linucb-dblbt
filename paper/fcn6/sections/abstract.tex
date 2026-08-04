@@ -1,19 +1,20 @@
 Deterministic backoff with listen before talk (DB-LBT) uses local countdown
-interruptions to build collision-reduced Wi-Fi/NR-U access schedules. Its
-recovery parameters are normally fixed, although offered load, active
-contenders, and external occupancy change the backoff profile that works best.
-We formulate DB-LBT parameter adaptation as a protocol-constrained contextual
-bandit problem under locally observable MAC information. Each transmitter runs
-LinUCB over 24 legal $(\kappa,\beta,m,b_{\mathrm{init}})$ tuples. The context
-contains only local CCA, queue, delay, retransmission, and ACK/HARQ statistics;
-the selected action changes the next DB-LBT recovery counter but leaves native
-Wi-Fi and NR-U procedures intact.
+interruptions to reduce repeated Wi-Fi/NR-U collisions, but one recovery
+profile need not suit both lightly and heavily loaded cells. We formulate its
+adaptation as a protocol-constrained contextual bandit under locally observable
+MAC information. Twenty-four legal DB-LBT profiles are screened offline. At
+deployment, each transmitter runs an independent LinUCB controller over two
+profiles whose ranking reverses between a $4+4$ light-load regime and a $6+6$
+high-load regime. Its 11 features contain only local CCA, queue, delay,
+retransmission, and ACK/HARQ history; neither peer state nor global evaluation
+utility enters online learning.
 
-We derive the sensing, reception, separability, and timescale conditions that
-make this local context informative. Paired event experiments then compare
-adaptive DB-LBT with random LBT and fixed DB-LBT. In a static $4+4$ regime,
-adaptive and fixed TMC DB-LBT are numerically identical. Across held-out
-scenarios, adaptation raises mean utility from $0.926467$ to $0.928023$; the
-non-ideal gain is $0.289\%$. LinUCB also exceeds context-free UCB in the
-combined dynamic case. A packet-level ns-3 cross-check produces mixed
-technology-level directions and exposes the unresolved validation gap.
+We state the sensing, reception, local-separability, and timescale conditions
+needed for such history to remain useful despite random fading and traffic.
+Across 32 untouched seeds and eight alternating 4096-round phases, adaptive
+minus fixed-TMC utility is $+0.007338$ under phase-conditional aggregation
+(95\% CI $[+0.007093,+0.007584]$; 32/32 positive). The gain is $+0.015735$ in
+the light phase and $-0.001058$ in the high phase. Median and 95th-percentile
+recovery times are 736 and 928 rounds, both below the phase dwell time. A
+whole-run mixed-population diagnostic is also reported and is negative,
+showing why the operating regime and aggregation rule must be explicit.

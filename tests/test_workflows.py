@@ -1228,6 +1228,85 @@ def test_reader_accepts_exact_dynamic_active_windows(tmp_path: Path) -> None:
     assert len(rows) == job.rounds
 
 
+def test_reader_accepts_exact_repeated_phase_schedule(tmp_path: Path) -> None:
+    from dblbt_fcn.records import read_job_rows
+    from dblbt_fcn.simulation import simulate_job_records
+
+    value = tiny_matrix(rounds=128).model_dump(mode="json")
+    value["scenarios"][0].update(
+        {
+            "traffic": "poisson",
+            "poisson_rate_packets_ms": 0.02,
+            "phases": [
+                {
+                    "id": "wifi-only",
+                    "duration_rounds": 32,
+                    "active_wifi_nodes": 1,
+                    "active_nru_nodes": 0,
+                    "poisson_rate_packets_ms": 0.02,
+                },
+                {
+                    "id": "nru-only",
+                    "duration_rounds": 32,
+                    "active_wifi_nodes": 0,
+                    "active_nru_nodes": 1,
+                    "poisson_rate_packets_ms": 0.03,
+                },
+            ],
+            "phase_repetitions": 2,
+        }
+    )
+    job = expand_matrix(MatrixSpec.model_validate(value))[0]
+    write_complete_rows(tmp_path, job, simulate_job_records(job))
+
+    rows = read_job_rows(job, tmp_path)
+
+    assert [row["round_id"] for row in rows if row["change_point"]] == [
+        0,
+        32,
+        64,
+        96,
+    ]
+
+
+def test_reader_rejects_phase_metadata_that_disagrees_with_schedule(
+    tmp_path: Path,
+) -> None:
+    from dblbt_fcn.records import read_job_rows
+    from dblbt_fcn.simulation import simulate_job_records
+
+    value = tiny_matrix(rounds=64).model_dump(mode="json")
+    value["scenarios"][0].update(
+        {
+            "traffic": "poisson",
+            "poisson_rate_packets_ms": 0.02,
+            "phases": [
+                {
+                    "id": "first",
+                    "duration_rounds": 32,
+                    "active_wifi_nodes": 1,
+                    "active_nru_nodes": 0,
+                    "poisson_rate_packets_ms": 0.02,
+                },
+                {
+                    "id": "second",
+                    "duration_rounds": 32,
+                    "active_wifi_nodes": 0,
+                    "active_nru_nodes": 1,
+                    "poisson_rate_packets_ms": 0.03,
+                },
+            ],
+        }
+    )
+    job = expand_matrix(MatrixSpec.model_validate(value))[0]
+    rows = list(simulate_job_records(job))
+    rows[32]["phase_id"] = "first"
+    write_complete_rows(tmp_path, job, rows)
+
+    with pytest.raises(ValueError, match="phase metadata"):
+        read_job_rows(job, tmp_path)
+
+
 def test_reader_requires_policy_provenance_before_first_decision(
     tmp_path: Path,
 ) -> None:

@@ -31,7 +31,8 @@ _EVENT_METRICS = (
 _NS3_METRICS = (
     "throughput_mbps",
     "mean_delay_us",
-    "collision_probability",
+    "packet_loss_ratio",
+    "simultaneous_access_collision_rate",
     "channel_occupancy",
 )
 
@@ -159,8 +160,8 @@ def cross_model_consistency(
         row.get("matrix") != "ns3-cross-validation" for row in event_rows
     ):
         raise ValueError("event cross-validation requires exactly 18 rows")
-    if len(ns3_scenario_rows) != 24:
-        raise ValueError("ns-3 cross-validation requires exactly 24 rows")
+    if len(ns3_scenario_rows) != 30:
+        raise ValueError("ns-3 cross-validation requires exactly 30 rows")
 
     scenarios: list[ScenarioConsistency] = []
     agreements: list[bool | None] = []
@@ -174,7 +175,8 @@ def cross_model_consistency(
         ns3_votes = [
             _vote(value, higher_is_better=metric == "throughput_mbps")
             for _, metric, value in ns3_differences
-            if metric != "channel_occupancy"
+            if metric
+            not in {"packet_loss_ratio", "channel_occupancy"}
         ]
         event_direction = _direction(event_votes)
         ns3_direction = _direction(ns3_votes)
@@ -232,7 +234,7 @@ def load_ns3_scenario_metrics(
     if (
         type(metadata) is not dict
         or metadata.get("audited") != 27
-        or metadata.get("scenario_rows") != 24
+        or metadata.get("scenario_rows") != 30
         or metadata.get("scenario_metrics_sha256") != _sha256(metrics)
     ):
         raise ValueError("ns-3 scenario metric hash or audit metadata is invalid")
@@ -283,7 +285,7 @@ def load_ns3_scenario_metrics(
                 "paired_difference": difference,
             }
         )
-    if len(rows) != 24:
+    if len(rows) != 30:
         raise ValueError("ns-3 scenario metric row count is invalid")
     return rows
 
@@ -390,11 +392,13 @@ def write_cross_model_evidence(
         "event_collision_probability_difference",
         "ns3_wifi_throughput_mbps_difference",
         "ns3_wifi_mean_delay_us_difference",
-        "ns3_wifi_collision_probability_difference",
+        "ns3_wifi_packet_loss_ratio_difference",
+        "ns3_wifi_simultaneous_access_collision_rate_difference",
         "ns3_wifi_channel_occupancy_difference",
         "ns3_nru_throughput_mbps_difference",
         "ns3_nru_mean_delay_us_difference",
-        "ns3_nru_collision_probability_difference",
+        "ns3_nru_packet_loss_ratio_difference",
+        "ns3_nru_simultaneous_access_collision_rate_difference",
         "ns3_nru_channel_occupancy_difference",
     )
     scenario_rows: list[dict[str, object]] = []
@@ -423,8 +427,11 @@ def write_cross_model_evidence(
                 "ns3_wifi_mean_delay_us_difference": ns3[
                     ("wifi", "mean_delay_us")
                 ],
-                "ns3_wifi_collision_probability_difference": ns3[
-                    ("wifi", "collision_probability")
+                "ns3_wifi_packet_loss_ratio_difference": ns3[
+                    ("wifi", "packet_loss_ratio")
+                ],
+                "ns3_wifi_simultaneous_access_collision_rate_difference": ns3[
+                    ("wifi", "simultaneous_access_collision_rate")
                 ],
                 "ns3_wifi_channel_occupancy_difference": ns3[
                     ("wifi", "channel_occupancy")
@@ -435,8 +442,11 @@ def write_cross_model_evidence(
                 "ns3_nru_mean_delay_us_difference": ns3[
                     ("nru", "mean_delay_us")
                 ],
-                "ns3_nru_collision_probability_difference": ns3[
-                    ("nru", "collision_probability")
+                "ns3_nru_packet_loss_ratio_difference": ns3[
+                    ("nru", "packet_loss_ratio")
+                ],
+                "ns3_nru_simultaneous_access_collision_rate_difference": ns3[
+                    ("nru", "simultaneous_access_collision_rate")
                 ],
                 "ns3_nru_channel_occupancy_difference": ns3[
                     ("nru", "channel_occupancy")
@@ -458,7 +468,7 @@ def write_cross_model_evidence(
     audit_payload = (
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "h5_status": report.h5_status,
                 "agreements": list(report.agreements),
                 "event_summary_sha256": _sha256(event_summary),

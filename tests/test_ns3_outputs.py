@@ -24,6 +24,12 @@ from dblbt_fcn.workflows import action_grid_hash
 
 PATCH_HASH = "1" * 64
 SCENARIO_HASH = "2" * 64
+SCENARIO_SOURCE = (
+    Path(__file__).resolve().parents[1]
+    / "ns3"
+    / "scenarios"
+    / "dblbt-nru-wifi-validation.cc"
+)
 
 
 def _sha256(path: Path) -> str:
@@ -59,6 +65,20 @@ def _reduce(root: Path, model_path: Path) -> object:
     )
 
 
+def test_scenario_counts_access_overlap_once_and_keeps_packet_loss_separate() -> None:
+    source = SCENARIO_SOURCE.read_text(encoding="ascii")
+
+    assert "double packetLossRatio {0.0};" in source
+    assert "double simultaneousAccessCollisionRate {0.0};" in source
+    assert "const bool overlap = own.Active () || other.Active ();" in source
+    assert "tracker.transmissions += 1;" in source
+    assert "tracker.overlaps += overlap ? 1 : 0;" in source
+    assert "packet_loss_ratio REAL NOT NULL" in source
+    assert "simultaneous_access_collision_rate REAL NOT NULL" in source
+    assert "sim_time_s REAL NOT NULL" in source
+    assert "shadowing_enabled INTEGER NOT NULL" in source
+
+
 def _write_valid_database(
     root: Path,
     job: object,
@@ -84,6 +104,8 @@ def _write_valid_database(
           nru_gnbs INTEGER NOT NULL,
           node_rate_bps INTEGER NOT NULL,
           traffic_mode TEXT NOT NULL,
+          sim_time_s REAL NOT NULL,
+          shadowing_enabled INTEGER NOT NULL,
           srs_enabled INTEGER NOT NULL,
           alpha INTEGER NOT NULL,
           cold_start_attempts INTEGER NOT NULL,
@@ -146,7 +168,8 @@ def _write_valid_database(
           technology TEXT PRIMARY KEY,
           throughput_mbps REAL NOT NULL,
           mean_delay_us REAL NOT NULL,
-          collision_probability REAL NOT NULL,
+          packet_loss_ratio REAL NOT NULL,
+          simultaneous_access_collision_rate REAL NOT NULL,
           channel_occupancy REAL NOT NULL
         );
         CREATE TABLE channel_occupancy_5 (
@@ -176,9 +199,9 @@ def _write_valid_database(
     )
     connection.execute(
         "INSERT INTO validation_metadata VALUES "
-        "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
-            1,
+            2,
             job.job_id,
             job.policy,
             job.scenario,
@@ -188,6 +211,8 @@ def _write_valid_database(
             job.nru_gnbs,
             job.node_rate_bps,
             job.traffic_mode,
+            job.sim_time_s,
+            int(job.shadowing_enabled),
             0,
             job.alpha,
             job.cold_start_attempts,
@@ -256,8 +281,8 @@ def _write_valid_database(
         )
     for technology in ("wifi", "nru"):
         connection.execute(
-            "INSERT INTO validation_metrics VALUES (?,?,?,?,?)",
-            (technology, 10.0, 500.0, 0.1, 0.4),
+            "INSERT INTO validation_metrics VALUES (?,?,?,?,?,?)",
+            (technology, 10.0, 500.0, 0.1, 0.04, 0.4),
         )
         connection.execute(
             "INSERT INTO channel_occupancy_5 VALUES (?,?,?,?)",
@@ -280,7 +305,7 @@ def _write_valid_database(
     connection.commit()
     connection.close()
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "status": "complete",
         "exit_code": 0,
         "job_id": job.job_id,
@@ -294,6 +319,8 @@ def _write_valid_database(
         "scenario_sha256": SCENARIO_HASH,
         "node_rate_bps": job.node_rate_bps,
         "traffic_mode": job.traffic_mode,
+        "sim_time_s": job.sim_time_s,
+        "shadowing_enabled": job.shadowing_enabled,
         "srs_enabled": False,
         "build_profile": "optimized",
     }
@@ -431,6 +458,7 @@ def test_validation_jobs_are_the_exact_frozen_27() -> None:
         assert job.app_start_s == 0.2
         assert job.node_rate_bps == 2_000_000
         assert job.traffic_mode == "aggregate-saturated-cbr"
+        assert job.shadowing_enabled is True
         assert job.alpha == 11
         assert job.cold_start_attempts == 8
         assert job.decision_interval == 32
@@ -501,9 +529,17 @@ def test_reduction_pairs_all_tmc_and_adaptive_ns3_metrics(
                 "UPDATE validation_metrics SET "
                 "throughput_mbps = throughput_mbps + ?, "
                 "mean_delay_us = mean_delay_us - ?, "
-                "collision_probability = collision_probability - ?, "
+                "packet_loss_ratio = packet_loss_ratio - ?, "
+                "simultaneous_access_collision_rate = "
+                "simultaneous_access_collision_rate - ?, "
                 "channel_occupancy = channel_occupancy + ?",
-                (offset, 50.0 * offset, 0.02 * offset, 0.05 * offset),
+                (
+                    offset,
+                    50.0 * offset,
+                    0.01 * offset,
+                    0.02 * offset,
+                    0.05 * offset,
+                ),
             )
         _refresh_manifest(root, job)
     before = {
@@ -513,8 +549,8 @@ def test_reduction_pairs_all_tmc_and_adaptive_ns3_metrics(
     report = _reduce(root, model_path)
 
     assert report.audited == 27
-    assert len(report.per_seed) == 72
-    assert len(report.scenario_means) == 24
+    assert len(report.per_seed) == 90
+    assert len(report.scenario_means) == 30
     row = next(
         row
         for row in report.per_seed
@@ -531,6 +567,34 @@ def test_reduction_pairs_all_tmc_and_adaptive_ns3_metrics(
         11.0,
         1.0,
     )
+    packet_loss = next(
+        row
+        for row in report.per_seed
+        if (
+            row.scenario,
+            row.seed,
+            row.technology,
+            row.metric,
+        ) == ("static-4x4", 410, "wifi", "packet_loss_ratio")
+    )
+    access_collision = next(
+        row
+        for row in report.per_seed
+        if (
+            row.scenario,
+            row.seed,
+            row.technology,
+            row.metric,
+        )
+        == (
+            "static-4x4",
+            410,
+            "wifi",
+            "simultaneous_access_collision_rate",
+        )
+    )
+    assert packet_loss.paired_difference == pytest.approx(-0.01)
+    assert access_collision.paired_difference == pytest.approx(-0.02)
     assert {
         path: (_sha256(path), path.stat().st_mtime_ns) for path in databases
     } == before

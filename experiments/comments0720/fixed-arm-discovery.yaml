@@ -1,0 +1,80 @@
+version: 1
+name: comments0720-fixed-arm-discovery
+rounds: 20000
+alpha: 11
+timing:
+  slot_us: 1
+  tx_us: 2000
+  wifi_ack_us: 0
+  nru_sync_us: 250
+seeds: [9103, 9113, 9127]
+policies: [pretrain_arm]
+conditions: []
+arm_ids: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23]
+scenarios:
+  - id: poisson-n03-p015
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.015
+  - id: poisson-n04-p025
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.025
+  - id: poisson-n05-p035
+    wifi_nodes: 5
+    nru_nodes: 5
+    traffic: poisson
+    poisson_rate_packets_ms: 0.035
+  - id: poisson-n06-p045
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.045
+  - id: poisson-n06-p015
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.015
+  - id: poisson-n03-p045
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: poisson
+    poisson_rate_packets_ms: 0.045
+  - id: saturated-n03
+    wifi_nodes: 3
+    nru_nodes: 3
+    traffic: saturated
+  - id: saturated-n06
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: saturated
+  - id: periodic-n04-p030-i100-d2000
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    interference_interval_ms: 100
+    interference_duration_us: 2000
+  - id: periodic-n06-p030-i030-d5000
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    interference_interval_ms: 30
+    interference_duration_us: 5000
+  - id: turnover-n04-p030-j40-l400
+    wifi_nodes: 4
+    nru_nodes: 4
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    join_interval_rounds: 40
+    lifetime_rounds: 400
+  - id: turnover-n06-p030-j40-l400
+    wifi_nodes: 6
+    nru_nodes: 6
+    traffic: poisson
+    poisson_rate_packets_ms: 0.030
+    join_interval_rounds: 40
+    lifetime_rounds: 400

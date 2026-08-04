@@ -1,0 +1,2 @@
+scenario_a,scenario_b,best_arm_a,best_arm_b,margin_a_over_b,lower_a_over_b,margin_b_over_a,lower_b_over_a
+poisson-n04-p025,poisson-n06-p045,16,22,0.016942376096094065,0.01674529155729979,9.49282734952761e-05,6.612964452109077e-05

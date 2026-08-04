@@ -2,45 +2,46 @@
 \label{sec:introduction}
 
 Wi-Fi and 5G New Radio in unlicensed spectrum (NR-U) contend without a common
-scheduler. Both technologies defer to detected energy and count down a random
-backoff, but the surrounding procedures differ. Wi-Fi follows DCF/EDCA after
-an inter-frame deferral. NR-U category-4 LBT must also obey channel-occupancy
-limits and align access to an NR transmission boundary
-\cite{ieee80211_2020,3gpp37213,naik2020next}. When several counters expire
-together, collisions waste airtime and extend delay tails.
+scheduler. Both defer to detected energy and count down a backoff, yet their
+surrounding procedures differ. Wi-Fi follows DCF/EDCA after an inter-frame
+deferral. NR-U category-4 LBT also observes channel-occupancy limits and aligns
+access to an NR transmission boundary
+\cite{ieee80211_2020,3gpp37213,naik2020next}. Simultaneous counter expiry can
+therefore waste airtime across both technologies.
 
-DB-LBT replaces part of this repeated random recovery with a counter derived
-from local countdown interruptions \cite{kosek2022dblbt}. The resulting
-spacing can approach a collision-free access order without node identities or
-cross-technology messages. Later work showed that the mechanism also works
-under non-full-buffer traffic, random busy slots, sensing perturbation, and
-asymmetric energy detection \cite{tinnirello2026deterministic}. Those regimes
-also expose a practical weakness: one fixed recovery tuple must serve both a
-quiet cell and a cell whose active set or queues have changed.
+DB-LBT replaces part of repeated random recovery with a counter derived from
+locally observed countdown interruptions \cite{kosek2022dblbt}. The mechanism
+can approach a collision-reduced order without node identities or
+cross-technology messages. Its later TMC form remains effective under
+non-full-buffer traffic, random busy periods, sensing perturbations, and
+asymmetric energy detection \cite{tinnirello2026deterministic}. Those cases
+also expose a control problem. A recovery tuple that admits intermittent
+queues quickly can be too aggressive after more contenders become active,
+whereas a conservative tuple can add avoidable delay in a light cell.
 
-Consider a node that has just completed an attempt. It knows whether CCA froze
-its countdown, how long packets waited, whether ACK/HARQ succeeded, and how its
-queue evolved. It does not know every peer queue or the instantaneous channel
-gain. The useful control question is which legal DB-LBT recovery profile should
-be used next. We formulate DB-LBT parameter adaptation as a protocol-constrained
-contextual bandit problem under locally observable MAC information.
+The instantaneous radio channel is not predictable from a short MAC history.
+It includes nonlinear CCA threshold crossings, fading, interference, and
+decoding outcomes. A transmitter nevertheless observes a slower protocol
+trace: countdown freezes, queue growth, access delay, retransmissions, and
+ACK/HARQ outcomes. When load or occupancy persists for several update windows,
+that trace can identify which DB-LBT profile works better without reconstructing
+the channel itself. This motivates our main formulation:
+\emph{DB-LBT parameter adaptation is a protocol-constrained contextual bandit
+under locally observable MAC information.}
 
-This formulation targets fixed indoor cells with mutual sensing and coarse
-changes in offered load, active contenders, or persistent occupancy. Within a
-phase, local histories must remain stable long enough to guide several updates.
-Across phases, the same histories must change enough to distinguish profiles.
-Such traffic and occupancy structure is common in scheduled application bursts,
-shifted active sets, and periodic incumbent activity even though individual
-CCA samples are random.
+The formulation targets mutually detectable indoor cells with piecewise-stable
+offered load or active population. The context must be stable long enough to
+learn, yet different enough across phases to make adaptation worthwhile. It is
+not intended for per-packet channel prediction.
 
-The contributions are threefold. First, we define a 24-arm contextual bandit
-whose actions are legal DB-LBT tuples; learning cannot alter sensing thresholds,
-Wi-Fi deferral, NR-U synchronization or occupancy limits, PHY rate, or
-retransmission semantics. Second, we derive conditions under which local
-CCA/MAC history provides an actionable context: the contention abstraction must
-hold, regimes that require different actions must be locally separable, and
-their dwell time must exceed observation and adaptation windows. Third, paired
-event experiments show that adaptation preserves the stable DB-LBT regime and
-provides a small held-out gain, while a packet-level cross-check exposes a
-mismatch for future experiments. Fast radio variation and strategic
-co-adaptation are treated as scope boundaries in Section~\ref{sec:discussion}.
+The contributions are threefold. First, we map DB-LBT recovery control to a
+contextual bandit whose actions cannot alter CCA thresholds, Wi-Fi deferral,
+NR-U synchronization or occupancy limits, PHY rate, or retransmission
+semantics. The 24-profile design space is screened offline and reduced to two
+conflicting profiles for online selection. Second, we connect the 11 local
+features to protocol events and state explicit sensing, reception,
+separability, and dwell-time conditions under which they are informative.
+Third, a paired 32-seed experiment measures both performance and adaptation
+time across repeated $4+4$ and $6+6$ phases. It finds a positive
+phase-conditional effect, identifies a small high-load penalty, and preserves
+the opposite whole-run diagnostic rather than hiding aggregation sensitivity.

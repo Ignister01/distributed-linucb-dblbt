@@ -74,6 +74,12 @@ struct OccupancyTracker
   }
 };
 
+struct AccessOverlapTracker
+{
+  uint64_t transmissions {0};
+  uint64_t overlaps {0};
+};
+
 enum class RadioKind
 {
   Wifi,
@@ -92,13 +98,16 @@ struct TechnologyMetrics
 {
   double throughputMbps {0.0};
   double meanDelayUs {0.0};
-  double collisionProbability {0.0};
+  double packetLossRatio {0.0};
+  double simultaneousAccessCollisionRate {0.0};
   double channelOccupancy {0.0};
 };
 
 SqliteOutputManager *g_output = nullptr;
 OccupancyTracker g_wifiOccupancy;
 OccupancyTracker g_nruOccupancy;
+AccessOverlapTracker g_wifiAccessOverlap;
+AccessOverlapTracker g_nruAccessOverlap;
 
 std::string
 Quote (const std::string &value)
@@ -145,10 +154,10 @@ IsHash (const std::string &value)
 }
 
 void
-ConfigureDefaults ()
+ConfigureDefaults (bool shadowingEnabled)
 {
   Config::SetDefault ("ns3::ThreeGppPropagationLossModel::ShadowingEnabled",
-                      BooleanValue (false));
+                      BooleanValue (shadowingEnabled));
   Config::SetDefault ("ns3::IdealBeamformingHelper::BeamformingMethod",
                       TypeIdValue (CellScanBeamforming::GetTypeId ()));
   Config::SetDefault ("ns3::IdealBeamformingHelper::BeamformingPeriodicity",
@@ -219,6 +228,11 @@ ObserveOccupancy (RadioKind kind, uint32_t nodeId, const Time &duration)
 {
   OccupancyTracker &own = kind == RadioKind::Wifi ? g_wifiOccupancy : g_nruOccupancy;
   OccupancyTracker &other = kind == RadioKind::Wifi ? g_nruOccupancy : g_wifiOccupancy;
+  AccessOverlapTracker &tracker =
+    kind == RadioKind::Wifi ? g_wifiAccessOverlap : g_nruAccessOverlap;
+  const bool overlap = own.Active () || other.Active ();
+  tracker.transmissions += 1;
+  tracker.overlaps += overlap ? 1 : 0;
   g_output->UidIsTxing (nodeId);
   if (own.Active ())
     {
@@ -354,7 +368,8 @@ CreateValidationTables (SQLiteOutput &database)
         "policy TEXT NOT NULL, scenario TEXT NOT NULL, seed INTEGER NOT NULL, "
         "run_id INTEGER NOT NULL, wifi_aps INTEGER NOT NULL, "
         "nru_gnbs INTEGER NOT NULL, node_rate_bps INTEGER NOT NULL, "
-        "traffic_mode TEXT NOT NULL, srs_enabled INTEGER NOT NULL, "
+        "traffic_mode TEXT NOT NULL, sim_time_s REAL NOT NULL, "
+        "shadowing_enabled INTEGER NOT NULL, srs_enabled INTEGER NOT NULL, "
         "alpha INTEGER NOT NULL, "
         "cold_start_attempts INTEGER NOT NULL, decision_interval INTEGER NOT NULL, "
         "context_dim INTEGER NOT NULL, num_arms INTEGER NOT NULL, "
@@ -386,7 +401,9 @@ CreateValidationTables (SQLiteOutput &database)
   Exec (database,
         "CREATE TABLE IF NOT EXISTS validation_metrics (technology TEXT PRIMARY KEY, "
         "throughput_mbps REAL NOT NULL, mean_delay_us REAL NOT NULL, "
-        "collision_probability REAL NOT NULL, channel_occupancy REAL NOT NULL);");
+        "packet_loss_ratio REAL NOT NULL, "
+        "simultaneous_access_collision_rate REAL NOT NULL, "
+        "channel_occupancy REAL NOT NULL);");
   for (const std::string table : {"validation_metadata", "dblbt_nodes",
                                   "dblbt_attempts", "dblbt_decisions",
                                   "validation_metrics"})
@@ -406,6 +423,8 @@ WriteValidationOutput (
   uint32_t wifiAps,
   uint32_t nruGnbs,
   uint64_t nodeRateBps,
+  double simTime,
+  bool shadowingEnabled,
   const std::string &modelHash,
   const std::string &modelExportHash,
   const std::string &gridHash,
@@ -417,11 +436,13 @@ WriteValidationOutput (
   SQLiteOutput database (outputDb, "/dblbt-" + jobId + "-custom");
   CreateValidationTables (database);
   Exec (database,
-        "INSERT INTO validation_metadata VALUES (1," + Quote (jobId) + "," +
+        "INSERT INTO validation_metadata VALUES (2," + Quote (jobId) + "," +
         Quote (policy) + "," + Quote (scenario) + "," + std::to_string (seed) +
         "," + std::to_string (runId) + "," + std::to_string (wifiAps) + "," +
         std::to_string (nruGnbs) + "," + std::to_string (nodeRateBps) + "," +
-        Quote (kTrafficMode) + ",0,11,8,32,11,24," + Quote (modelHash) +
+        Quote (kTrafficMode) + "," + Number (simTime) + "," +
+        std::to_string (shadowingEnabled ? 1 : 0) +
+        ",0,11,8,32,11,24," + Quote (modelHash) +
         "," + Quote (modelExportHash) + "," + Quote (gridHash) + "," +
         Quote (kNs3Commit) + "," + Quote (kNrCommit) + "," + Quote (kNruCommit) +
         "," + Quote (patchHash) + "," + Quote (scenarioHash) + ");");
@@ -481,7 +502,8 @@ WriteValidationOutput (
             "INSERT INTO validation_metrics VALUES (" + Quote (technology) +
             "," + Number (value.throughputMbps) + "," +
             Number (value.meanDelayUs) + "," +
-            Number (value.collisionProbability) + "," +
+            Number (value.packetLossRatio) + "," +
+            Number (value.simultaneousAccessCollisionRate) + "," +
             Number (value.channelOccupancy) + ");");
     }
 }
@@ -509,6 +531,7 @@ main (int argc, char *argv[])
   uint32_t interferenceDurationMs = 2;
   double simTime = 2.0;
   double appStart = 0.2;
+  bool shadowingEnabled = false;
   bool formal = false;
 
   CommandLine cmd;
@@ -530,6 +553,7 @@ main (int argc, char *argv[])
   cmd.AddValue ("nodeRate", "saturated offered load per contender", nodeRate);
   cmd.AddValue ("interferenceIntervalMs", "periodic interference interval", interferenceIntervalMs);
   cmd.AddValue ("interferenceDurationMs", "periodic interference duration", interferenceDurationMs);
+  cmd.AddValue ("shadowingEnabled", "enable 3GPP propagation shadowing", shadowingEnabled);
   cmd.AddValue ("formal", "enforce the preregistered formal matrix", formal);
   cmd.Parse (argc, argv);
 
@@ -564,11 +588,13 @@ main (int argc, char *argv[])
                        "formal timing or run id changed");
       NS_ABORT_MSG_IF (nodeRate != "2Mbps",
                        "formal offered load changed");
+      NS_ABORT_MSG_IF (!shadowingEnabled,
+                       "formal shadowing must be enabled");
     }
 
   RngSeedManager::SetSeed (seed);
   RngSeedManager::SetRun (runId);
-  ConfigureDefaults ();
+  ConfigureDefaults (shadowingEnabled);
   if (policy != "random")
     {
       Config::SetDefault ("ns3::NrDbLbtAccessManager::Policy", StringValue (policy));
@@ -835,11 +861,18 @@ main (int argc, char *argv[])
                             ? aggregate.delay.GetMicroSeconds () /
                                 static_cast<double> (aggregate.rxPackets)
                             : 0.0;
-      value.collisionProbability = aggregate.txPackets > 0
-                                     ? static_cast<double> (
-                                         aggregate.txPackets - aggregate.rxPackets) /
-                                         aggregate.txPackets
-                                     : 0.0;
+      value.packetLossRatio = aggregate.txPackets > 0
+                                ? static_cast<double> (
+                                    aggregate.txPackets - aggregate.rxPackets) /
+                                    aggregate.txPackets
+                                : 0.0;
+      const AccessOverlapTracker &access =
+        technology == "wifi" ? g_wifiAccessOverlap : g_nruAccessOverlap;
+      value.simultaneousAccessCollisionRate = access.transmissions > 0
+                                                  ? static_cast<double> (
+                                                      access.overlaps) /
+                                                      access.transmissions
+                                                  : 0.0;
       value.channelOccupancy = std::min (
         (technology == "wifi" ? g_wifiOccupancy.total : g_nruOccupancy.total)
           .GetSeconds () / measurementDuration,
@@ -862,7 +895,8 @@ main (int argc, char *argv[])
   std::string jobId = scenario + "__seed-" + std::to_string (seed) + "__" + policy;
   WriteValidationOutput (
     outputDb, jobId, policy, scenario, seed, runId, wifiAps, nruGnbs,
-    DataRate (nodeRate).GetBitRate (), modelSha256, modelExportSha256,
+    DataRate (nodeRate).GetBitRate (), simTime, shadowingEnabled,
+    modelSha256, modelExportSha256,
     actionGridHash, patchSha256,
     scenarioSha256, bindings, metrics);
 

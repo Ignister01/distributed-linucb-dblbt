@@ -89,6 +89,7 @@ def _database(path: Path) -> None:
               seed INTEGER NOT NULL, run_id INTEGER NOT NULL,
               wifi_aps INTEGER NOT NULL, nru_gnbs INTEGER NOT NULL,
               node_rate_bps INTEGER NOT NULL, traffic_mode TEXT NOT NULL,
+              sim_time_s REAL NOT NULL, shadowing_enabled INTEGER NOT NULL,
               srs_enabled INTEGER NOT NULL, alpha INTEGER NOT NULL,
               cold_start_attempts INTEGER NOT NULL,
               decision_interval INTEGER NOT NULL,
@@ -126,7 +127,8 @@ def _database(path: Path) -> None:
             );
             CREATE TABLE validation_metrics (
               technology TEXT PRIMARY KEY, throughput_mbps REAL NOT NULL,
-              mean_delay_us REAL NOT NULL, collision_probability REAL NOT NULL,
+              mean_delay_us REAL NOT NULL, packet_loss_ratio REAL NOT NULL,
+              simultaneous_access_collision_rate REAL NOT NULL,
               channel_occupancy REAL NOT NULL
             );
             CREATE TABLE channel_occupancy_5 (
@@ -156,9 +158,9 @@ def _database(path: Path) -> None:
         )
         connection.execute(
             "INSERT INTO validation_metadata VALUES "
-            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            "(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
-                1,
+                2,
                 "static-4x4__seed-410__random",
                 "random",
                 "static-4x4",
@@ -168,6 +170,8 @@ def _database(path: Path) -> None:
                 4,
                 2_000_000,
                 "aggregate-saturated-cbr",
+                2.0,
+                1,
                 0,
                 11,
                 8,
@@ -181,7 +185,7 @@ def _database(path: Path) -> None:
                 "fe0a1d2a5fb7d1547e46042041288a684893ba9e",
                 "75a45143b1cd382326876a9597e856338673039a",
                 "8a729fa68489bc0bc724f6e6d925b88aa25b574423606f7a36f57065d6e284b9",
-                "daaec0703558baf2ec83f3b8b6e394b42fbad098f85ec8bdb6b6ced16c13ec59",
+                "f4a8ed1a4eec64b9b3a534b4545c5a925a914e22696a6ecbe13183859bd84565",
             ),
         )
         controller_ids = [*range(4), *range(8, 12)]
@@ -206,8 +210,8 @@ def _database(path: Path) -> None:
             )
         for technology in ("wifi", "nru"):
             connection.execute(
-                "INSERT INTO validation_metrics VALUES (?,?,?,?,?)",
-                (technology, 10.0, 500.0, 0.1, 0.4),
+                "INSERT INTO validation_metrics VALUES (?,?,?,?,?,?)",
+                (technology, 10.0, 500.0, 0.1, 0.04, 0.4),
             )
             connection.execute(
                 "INSERT INTO channel_occupancy_5 VALUES (?,?,?,?)",
@@ -234,7 +238,7 @@ def test_validation_lock_freezes_formal_sources_and_runtime() -> None:
     assert RUNNER.is_file()
     assert LOCK.is_file()
     assert _assignments(LOCK) == {
-        "schema_version": "1",
+        "schema_version": "2",
         "ns3_commit": "ac88b75eac1818c673cf2c939a96ac3005b1f051",
         "nr_commit": "fe0a1d2a5fb7d1547e46042041288a684893ba9e",
         "nru_commit": "75a45143b1cd382326876a9597e856338673039a",
@@ -242,7 +246,7 @@ def test_validation_lock_freezes_formal_sources_and_runtime() -> None:
         "nr_patch_sha256": "5f95f6e2a6bf717ee177fd00352b49507ea9d2c98ac96b4777e6da64221634a6",
         "nru_patch_sha256": "c792aac7d05561fc354043f62521d36adf137bb6e00fac0f4156688d8eddaeb9",
         "patch_bundle_sha256": "8a729fa68489bc0bc724f6e6d925b88aa25b574423606f7a36f57065d6e284b9",
-        "scenario_sha256": "daaec0703558baf2ec83f3b8b6e394b42fbad098f85ec8bdb6b6ced16c13ec59",
+        "scenario_sha256": "f4a8ed1a4eec64b9b3a534b4545c5a925a914e22696a6ecbe13183859bd84565",
         "model_sha256": "70611e9712e3a8e4b0f35fc8e0e616f4fde9a20b17c844f1b6406da2833301e6",
         "model_export_sha256": "f82d68db38cdc66a88cb144d9337a22b9e43b44f45643fbbaf8e42b8e9e8efd9",
         "action_grid_hash": "558da7340dfa32d8cc484ba68a05951314936d7aff34a145cc34ea051c07707c",
@@ -264,6 +268,14 @@ def test_runner_enforces_paths_workers_and_toolchain() -> None:
     assert 'VALIDATION_CC="gcc-11"' in text
     assert 'VALIDATION_CXX="g++-11"' in text
     assert "--build-profile=optimized" in text
+    smoke_body = text.split("run_smoke_policy() {", 1)[1].split(
+        "\n}\n\nrun_smoke()", 1
+    )[0]
+    formal_body = text.split("run_formal_job() {", 1)[1].split(
+        "\n}\n\nrun_formal_matrix()", 1
+    )[0]
+    assert "--shadowingEnabled=false" in smoke_body
+    assert "--shadowingEnabled=true" in formal_body
 
 
 @pytest.mark.skipif(
@@ -365,7 +377,7 @@ def test_runner_verifies_all_frozen_source_hashes(tmp_path: Path) -> None:
     bad_lock = tmp_path / "bad.env"
     bad_lock.write_text(
         fixture_lock.read_text(encoding="ascii").replace(
-            "scenario_sha256=daaec070", "scenario_sha256=0aaec070"
+            "scenario_sha256=f4a8ed1a", "scenario_sha256=04a8ed1a"
         ),
         encoding="ascii",
     )

@@ -57,6 +57,7 @@ AblationName = Literal[
     "context_free_ucb",
     "collision_weight_0.125",
     "collision_weight_0.5",
+    "restricted_profiles",
 ]
 
 
@@ -83,6 +84,23 @@ class TimingSpec(_StrictModel):
     nru_sync_us: int = Field(default=250, ge=1)
 
 
+class RegimePhaseSpec(_StrictModel):
+    """One explicit locally stationary interval in a repeated scenario."""
+
+    id: str
+    duration_rounds: int = Field(ge=32)
+    active_wifi_nodes: int = Field(ge=0)
+    active_nru_nodes: int = Field(ge=0)
+    poisson_rate_packets_ms: float = Field(
+        gt=0, allow_inf_nan=False
+    )
+
+    @field_validator("id")
+    @classmethod
+    def validate_id(cls, value: str) -> str:
+        return _nonempty_identifier(value, label="phase id")
+
+
 class ScenarioSpec(_StrictModel):
     """A fully explicit topology and exogenous channel condition."""
 
@@ -100,6 +118,12 @@ class ScenarioSpec(_StrictModel):
     interruption_std: float = Field(default=0.0, ge=0, allow_inf_nan=False)
     join_interval_rounds: int | None = Field(default=None, gt=0)
     lifetime_rounds: int | None = Field(default=None, gt=0)
+    phases: tuple[RegimePhaseSpec, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    phase_repetitions: int = Field(
+        default=1, ge=1, exclude_if=lambda value: value == 1
+    )
     trace: bool = False
 
     @field_validator("id")
@@ -111,6 +135,11 @@ class ScenarioSpec(_StrictModel):
     @classmethod
     def normalize_zero_std(cls, value: float) -> float:
         return 0.0 if value == 0.0 else value
+
+    @field_validator("phases", mode="before")
+    @classmethod
+    def freeze_phases(cls, value: object) -> tuple[object, ...]:
+        return _tuple_input(value, label="phases")
 
     @model_validator(mode="after")
     def validate_combinations(self) -> Self:
@@ -150,6 +179,34 @@ class ScenarioSpec(_StrictModel):
             raise ValueError(
                 "dynamic join interval and lifetime must appear together"
             )
+
+        if self.phases:
+            if self.traffic != "poisson":
+                raise ValueError("explicit phases require Poisson traffic")
+            if self.legacy_ap_nodes or self.legacy_sta_nodes:
+                raise ValueError(
+                    "explicit phases do not schedule legacy nodes"
+                )
+            if any(value is not None for value in dynamic_fields):
+                raise ValueError(
+                    "explicit phases cannot use dynamic join/lifetime fields"
+                )
+            phase_ids = [phase.id for phase in self.phases]
+            if len(phase_ids) != len(set(phase_ids)):
+                raise ValueError("phase ids must be unique")
+            for phase in self.phases:
+                if phase.active_wifi_nodes + phase.active_nru_nodes == 0:
+                    raise ValueError("each phase must contain an active node")
+                if phase.active_wifi_nodes > self.wifi_nodes:
+                    raise ValueError(
+                        "phase Wi-Fi nodes exceed the declared topology"
+                    )
+                if phase.active_nru_nodes > self.nru_nodes:
+                    raise ValueError(
+                        "phase NR-U nodes exceed the declared topology"
+                    )
+        elif self.phase_repetitions != 1:
+            raise ValueError("phase repetitions require explicit phases")
         return self
 
 
@@ -281,6 +338,14 @@ class JobSpec(_StrictModel):
             raise ValueError("pretrain_arm requires an arm id")
         if self.ablation is not None and self.policy != "adaptive_db_lbt":
             raise ValueError("ablation requires adaptive_db_lbt")
+        if self.scenario.phases:
+            scheduled_rounds = self.scenario.phase_repetitions * sum(
+                phase.duration_rounds for phase in self.scenario.phases
+            )
+            if self.rounds != scheduled_rounds:
+                raise ValueError(
+                    "job rounds must equal the complete phase schedule"
+                )
         return self
 
     @property

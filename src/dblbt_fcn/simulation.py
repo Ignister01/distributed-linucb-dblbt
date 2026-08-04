@@ -94,7 +94,10 @@ def _build_nodes(job: JobSpec) -> list[Node]:
                 policy_kind=policy,
                 selected=selected,
                 remaining=selected,
-                active=job.scenario.join_interval_rounds is None,
+                active=(
+                    job.scenario.join_interval_rounds is None
+                    and not job.scenario.phases
+                ),
                 backlogged=job.scenario.traffic == "saturated",
             )
         )
@@ -173,6 +176,11 @@ def simulate_job_records(
                 and job.ablation != "frozen_online"
             ),
             collision_weight=collision_weight,
+            allowed_arms=(
+                (4, 20)
+                if job.ablation == "restricted_profiles"
+                else None
+            ),
             interruption_perturbations={
                 node.node_id: InterruptionPerturbation(
                     job.scenario.interruption_std,
@@ -196,21 +204,41 @@ def simulate_job_records(
     }
     pending_arrivals = {node.node_id: 0 for node in nodes}
     poisson_sources: dict[str, PoissonTraffic] = {}
+    phase_poisson_sources: tuple[dict[str, PoissonTraffic], ...] = ()
     if job.scenario.traffic == "poisson":
         rate = job.scenario.poisson_rate_packets_ms
         if rate is None:
             raise RuntimeError("validated poisson job is missing its rate")
-        poisson_sources = {
-            node.node_id: PoissonTraffic(
-                rate,
-                random.Random(
-                    derive_stream_seed(
-                        job.exogenous_seed, node.node_id, "arrivals"
+        if job.scenario.phases:
+            phase_poisson_sources = tuple(
+                {
+                    node.node_id: PoissonTraffic(
+                        phase.poisson_rate_packets_ms,
+                        random.Random(
+                            derive_stream_seed(
+                                job.exogenous_seed,
+                                node.node_id,
+                                f"arrivals_phase_{phase_index}",
+                            )
+                        ),
                     )
-                ),
+                    for node in nodes
+                }
+                for phase_index, phase in enumerate(job.scenario.phases)
             )
-            for node in nodes
-        }
+            poisson_sources = phase_poisson_sources[0]
+        else:
+            poisson_sources = {
+                node.node_id: PoissonTraffic(
+                    rate,
+                    random.Random(
+                        derive_stream_seed(
+                            job.exogenous_seed, node.node_id, "arrivals"
+                        )
+                    ),
+                )
+                for node in nodes
+            }
 
     def set_active(node: Node, active: bool) -> None:
         if node.policy_kind is PolicyKind.ADAPTIVE:
@@ -261,7 +289,45 @@ def simulate_job_records(
     previous_decision_context: dict[str, list[float]] = {}
     local_sequences: dict[str, int] = {}
     traffic_sample_at_us = channel.now_us
+    current_phase_index: int | None = None
     for round_id in range(job.rounds):
+        phase_id: str | None = None
+        phase_index: int | None = None
+        phase_round: int | None = None
+        change_point = False
+        if job.scenario.phases:
+            cycle_round = round_id % sum(
+                phase.duration_rounds for phase in job.scenario.phases
+            )
+            phase_start = 0
+            for candidate_index, candidate in enumerate(job.scenario.phases):
+                phase_end = phase_start + candidate.duration_rounds
+                if cycle_round < phase_end:
+                    phase_index = candidate_index
+                    phase_id = candidate.id
+                    phase_round = cycle_round - phase_start
+                    break
+                phase_start = phase_end
+            if phase_index is None or phase_round is None:
+                raise RuntimeError("phase schedule failed to cover a round")
+            change_point = phase_index != current_phase_index
+            if change_point:
+                current_phase_index = phase_index
+                poisson_sources = phase_poisson_sources[phase_index]
+                phase = job.scenario.phases[phase_index]
+                wifi_active = 0
+                nru_active = 0
+                for node in nodes:
+                    should_be_active = False
+                    if node.technology is Technology.WIFI:
+                        should_be_active = wifi_active < phase.active_wifi_nodes
+                        wifi_active += 1
+                    elif node.technology is Technology.NRU:
+                        should_be_active = nru_active < phase.active_nru_nodes
+                        nru_active += 1
+                    if node.active != should_be_active:
+                        set_active(node, should_be_active)
+
         join_interval = job.scenario.join_interval_rounds
         lifetime = job.scenario.lifetime_rounds
         if join_interval is not None and lifetime is not None:
@@ -418,6 +484,10 @@ def simulate_job_records(
             "seed": job.seed,
             "config_hash": config_hash,
             "round_id": result.round_id,
+            "phase_id": phase_id,
+            "phase_index": phase_index,
+            "phase_round": phase_round,
+            "change_point": change_point,
             "tx_start_us": result.now_us,
             "round_end_us": channel.now_us,
             "kind": result.kind,

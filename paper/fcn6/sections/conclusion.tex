@@ -1,13 +1,11 @@
 \section{Conclusion}
 \label{sec:conclusion}
 
-We formulated DB-LBT parameter adaptation as a protocol-constrained contextual
-bandit driven by local MAC information. Under mutual sensing, reliable
-isolated reception, local separability, and sufficient regime dwell time, the
-11 measured features distinguish when a different recovery tuple can help.
-Distributed LinUCB then selects among 24 legal profiles without changing native
-Wi-Fi or NR-U access rules. The completed event study preserves the stable
-DB-LBT regime and finds a small held-out gain, with the clearest contextual
-benefit under combined dynamic load. Packet-level directions are mixed.
-Longer ns-3 campaigns with controlled fading, sensing, and adaptation
-timescales are the next step.
+We cast DB-LBT recovery adaptation as a protocol-constrained contextual bandit
+driven by local MAC history. Offline screening reduces 24 legal tuples to two
+profiles with opposite light/high-load rankings; distributed LinUCB then
+selects between them without shared state or changes to native Wi-Fi and NR-U
+procedures. In the tested phase-conditional setting, the method improves
+utility for all 32 formal seeds and recovers well before the next regime
+change. Its high-load penalty and negative whole-run diagnostic define the
+boundary of that conclusion as clearly as the light-load gain.
